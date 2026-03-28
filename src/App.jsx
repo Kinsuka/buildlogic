@@ -430,7 +430,7 @@ function LotCard({lot,st,setST,clientMode}) {
         <div style={{padding:"10px 16px",background:"var(--sf2)",borderTop:"1px solid var(--bd)"}}>
           <div style={{fontSize:10,fontWeight:600,color:"var(--tx3)",textTransform:"uppercase",letterSpacing:".05em",marginBottom:7}}>Ordre d'intervention</div>
           <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-            {lot.sequence.map((s,i)=><span key={i} style={{fontSize:10,background:"var(--sf)",border:"1px solid var(--bd)",borderRadius:12,padding:"3px 9px",color:"var(--tx2)",whiteSpace:"nowrap"}}><span style={{color:"var(--tx3)",marginRight:4}}>{i+1}.</span>{s}</span>)}
+            {(lot.sequence||[]).map((s,i)=><span key={i} style={{fontSize:10,background:"var(--sf)",border:"1px solid var(--bd)",borderRadius:12,padding:"3px 9px",color:"var(--tx2)",whiteSpace:"nowrap"}}><span style={{color:"var(--tx3)",marginRight:4}}>{i+1}.</span>{s}</span>)}
           </div>
         </div>
         {clientMode?(
@@ -514,7 +514,7 @@ function RapportModal({onClose,PROJECT}) {
             <strong>{l.title}</strong> — {l.meta}
             <ul style={{fontSize:12,marginTop:4}}>
               <li>Métiers : {l.metiers.map(m=>m.name).join(", ")}</li>
-              <li>Séquence : {l.sequence.join(" → ")}</li>
+              <li>Séquence : {(l.sequence||[]).join(" → ")}</li>
             </ul>
           </div>
         ))}
@@ -1030,39 +1030,51 @@ function DocumentationModal({onClose}) {
   ];
 
   const RENDEMENTS = [
-    {metier:"Carreleur", rows:[
+    {metier:"Carreleur", coeff:1.30, rows:[
       ["Dépose carrelage sol","m²/j",12,18,25],["Ragréage préparatoire","m²/j",20,30,40],
       ["Étanchéité liquide (SPEC)","m²/j",15,20,30],["Pose 60×60","m²/j",6,8,10],
       ["Pose grand format 120×60","m²/j",4,6,7],["Pose grand format 120×120","m²/j",3,4,5],
       ["Faïence murale","m²/j",5,7,9],["Plinthes carrelées","ml/j",15,20,25],
     ]},
-    {metier:"Plombier", rows:[
+    {metier:"Plombier", coeff:1.35, rows:[
       ["SdB complète (douche+WC+vasque)","j",3,4,5],["Douche italienne seule","j",1,1.5,2],
       ["WC suspendu Geberit+bâti","j",0.5,1,1.5],["Vasque + robinetterie","j",0.5,0.5,1],
       ["Création alimentation eau","ml/j",10,15,20],["Création évacuation EU","ml/j",8,12,18],
       ["Test pression / mise en eau","j",0.5,1,1.5],
     ]},
-    {metier:"Électricien", rows:[
+    {metier:"Électricien", coeff:1.40, rows:[
       ["Mise en conformité tableau+circuits","j",2,3,5],["Circuit prise/éclairage","j",0.5,0.75,1],
       ["Création saignée + encastrement","ml/j",6,12,18],["Adaptation cuisine standard","j",1,1.5,2],
       ["Raccordement SdB","j",0.5,1,1.5],["Contrôle + tests finaux","j",0.5,1,1.5],
     ]},
-    {metier:"Plafonneur", rows:[
+    {metier:"Plafonneur", coeff:1.40, rows:[
       ["Faux plafond simple","m²/j",8,12,15],["Faux plafond avec spots","m²/j",5,8,10],
       ["Cloison simple BA13","m²/j",10,14,18],["Enduit de finition","m²/j",12,18,25],
     ]},
-    {metier:"Maçon", rows:[
+    {metier:"Maçon", coeff:1.50, rows:[
       ["Démolition mur non porteur","ml/j",3,4,6],["Démolition mur porteur","ml/j",1,2,3],
       ["Ouverture mur porteur+étançonnement","u/j",0.5,1,1.5],["Pose IPN / linteau","j",1,1.5,2],
       ["Évacuation gravats","m³/j",3,5,8],
     ]},
-    {metier:"Peintre", rows:[
+    {metier:"Peintre", coeff:1.25, rows:[
       ["Préparation support légère","m²/j",25,35,45],["Préparation support lourde","m²/j",12,18,25],
       ["Peinture murs apprêt+2 couches","m²/j",25,35,45],["Peinture plafond","m²/j",20,28,35],
     ]},
-    {metier:"Menuisier", rows:[
+    {metier:"Menuisier", coeff:1.30, rows:[
       ["Pose porte intérieure + bloc","j/u",0.5,0.75,1],["Pose châssis PVC/alu petit format","j/u",1,1.5,2],
       ["Pose châssis grand format >150cm","j/u",1.5,2,3],["Installation cuisine (fournie)","j",2,3,4],
+    ]},
+    {metier:"Couvreur", coeff:1.35, rows:[
+      ["Dépose ancienne couverture tuiles","m²/j",15,20,30],["Pose tuiles + lattis","m²/j",6,10,14],
+      ["Étanchéité toiture plate EPDM","m²/j",8,12,18],["Pose Velux (remplacement)","u/j",1,2,3],
+    ]},
+    {metier:"Chauffagiste", coeff:1.30, rows:[
+      ["Installation chaudière gaz condensation","j",1,2,3],["Pose radiateur panneau","u/j",3,4,6],
+      ["Tuyauterie chauffage","ml/j",8,12,18],["Équilibrage + mise en service","j",0.5,1,2],
+    ]},
+    {metier:"Parqueteur", coeff:1.25, rows:[
+      ["Dépose revêtement souple","m²/j",20,30,40],["Pose parquet contrecollé","m²/j",10,15,20],
+      ["Pose vinyle LVT clipsable","m²/j",18,25,35],["Ponçage + vitrification","m²/j",20,30,40],
     ]},
   ];
 
@@ -1268,15 +1280,20 @@ Claude (claude.ai) — rôle : chef de chantier / auditeur
           {/* ── RENDEMENTS ── */}
           {section==='rendements' && <>
             <div style={{...S.h2,borderTop:"none",marginTop:0,paddingTop:0}}>Grille de rendements de référence</div>
-            <div style={S.p}>119 prestations encodées dans <code style={{fontFamily:"monospace",background:"var(--sf2)",padding:"1px 5px",borderRadius:4}}>mo_rendements</code>. Sources : CSTC, Confédération Construction Belge, marché belge validé GPT-4 (8/10 cohérence). Les coefficients de complexité rénovation sont à valider par ONA — chaque chantier terminé affine ces données.</div>
+            <div style={S.p}>187 prestations encodées dans <code style={{fontFamily:"monospace",background:"var(--sf2)",padding:"1px 5px",borderRadius:4}}>mo_rendements</code> — 14 métiers. Sources : Praesy.be, Buildwise BE, marché belge 2026. Coefficients de complexité rénovation validés et encodés.</div>
 
             <div style={{padding:"8px 12px",background:"var(--bbg)",border:"1px solid var(--bbd)",borderRadius:8,fontSize:12,color:"var(--btx)",marginBottom:16}}>
-              <strong>Note :</strong> Ces rendements sont des cadences de production brute. En rénovation, ajouter les temps incompressibles : protection, percements, évacuation, reprises, tests. Le coefficient de complexité rénovation (à valider) sera typiquement ×1.2 à ×1.4 selon le corps de métier.
+              <strong>Coeff. réno :</strong> multiplicateur appliqué aux rendements de référence en contexte rénovation. Un carreleur qui pose 8m²/j en neuf pose ~6m²/j en rénovation (÷ coeff 1.30). Source : Praesy.be/Buildwise BE (11-13€/m² neuf vs 15-20€/m² réno Wallonie).
             </div>
 
-            {RENDEMENTS.map(({metier, rows}) => (
+            {RENDEMENTS.map(({metier, coeff, rows}) => (
               <div key={metier} style={{marginBottom:20}}>
-                <div style={{fontSize:13,fontWeight:600,color:"var(--tx)",marginBottom:6,padding:"5px 10px",background:"var(--sf2)",borderRadius:6}}>{metier}</div>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                  <div style={{fontSize:13,fontWeight:600,color:"var(--tx)",padding:"5px 10px",background:"var(--sf2)",borderRadius:6,flex:1}}>{metier}</div>
+                  <div style={{fontSize:11,fontWeight:600,padding:"3px 10px",borderRadius:6,background:"var(--rbg)",color:"var(--rtx)",whiteSpace:"nowrap"}}>
+                    Coeff réno ×{coeff}
+                  </div>
+                </div>
                 <table style={S.table}>
                   <thead><tr><th style={S.th}>Prestation</th><th style={S.thr}>Min</th><th style={S.thr}>Sug</th><th style={S.thr}>Max</th><th style={S.th}>Unité</th></tr></thead>
                   <tbody>
@@ -1316,9 +1333,6 @@ Claude (claude.ai) — rôle : chef de chantier / auditeur
             <div style={S.h3}>Prompt auditeur ONA</div>
             <div style={{...S.code,fontSize:11,lineHeight:1.6}}>{PROMPT_AUDIT}</div>
             <div style={S.p}>Pour utiliser : ouvrir une nouvelle conversation Claude, coller ce prompt, puis coller le <code style={{fontFamily:"monospace",background:"var(--sf2)",padding:"1px 5px",borderRadius:4}}>projet_json</code> du projet à auditer (disponible dans Supabase, colonne <code style={{fontFamily:"monospace",background:"var(--sf2)",padding:"1px 5px",borderRadius:4}}>projet_json</code> de <code style={{fontFamily:"monospace",background:"var(--sf2)",padding:"1px 5px",borderRadius:4}}>bl_projects</code>).</div>
-
-            <div style={S.h3}>Prochaine étape — coefficients de complexité</div>
-            <div style={S.p}>Les colonnes <code style={{fontFamily:"monospace",background:"var(--sf2)",padding:"1px 5px",borderRadius:4}}>coeff_complexite_reno</code> et <code style={{fontFamily:"monospace",background:"var(--sf2)",padding:"1px 5px",borderRadius:4}}>temps_fixe_j</code> sont créées dans <code style={{fontFamily:"monospace",background:"var(--sf2)",padding:"1px 5px",borderRadius:4}}>mo_rendements</code> et en attente de validation. Sources prévues : CSTC, Confédération Construction Belge, retours chantiers ONA.</div>
           </>}
 
           {/* ── SUPABASE ── */}
@@ -1584,6 +1598,7 @@ export default function App() {
         // Garantir les champs minimaux
         if (!proj.lots) proj.lots = [];
         if (!proj.suspens) proj.suspens = [];
+        proj.lots.forEach(l => { if (!l.sequence) l.sequence = []; });
         if (!proj.client) proj.client = fromList.client_nom || clientNom;
         setPROJECT(proj);
         showToast(`✅ ${proj.client} chargé`);
@@ -1595,6 +1610,7 @@ export default function App() {
       if (!proj) throw new Error("Projet introuvable ou projet_json manquant");
       if (!proj.lots) proj.lots = [];
       if (!proj.suspens) proj.suspens = [];
+      proj.lots.forEach(l => { if (!l.sequence) l.sequence = []; });
       if (!proj.client) proj.client = clientNom;
       setPROJECT(proj);
       showToast(`✅ ${proj.client} chargé`);
@@ -1656,7 +1672,7 @@ export default function App() {
         md+=`| **Total ${m.name}** | | **${fE(mt)}** |\n\n`;
       });
       if (!forClient&&imprevu>0) md+=`> ⚠️ **Provision imprévus : ${fE(imprevu)}**\n\n`;
-      md+=`**Ordre d'intervention :** ${lot.sequence.map((s,i)=>`${i+1}. ${s}`).join(" · ")}\n\n> **Total ${lot.title} : ${fE(total)}** *(imprévus inclus)*\n\n---\n\n`;
+      md+=`**Ordre d'intervention :** ${(lot.sequence||[]).map((s,i)=>`${i+1}. ${s}`).join(" · ")}\n\n> **Total ${lot.title} : ${fE(total)}** *(imprévus inclus)*\n\n---\n\n`;
     });
     const gt=PROJECT.lots.reduce((s,lot)=>s+lotTotals(st,lot).total,0);
     md+=`## Récapitulatif\n\n| | Montant |\n|---|---:|\n`;
