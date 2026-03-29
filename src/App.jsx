@@ -21,6 +21,7 @@ import HowToStartModal from "./components/HowToStartModal.jsx";
 import DocumentationModal from "./components/DocumentationModal.jsx";
 import ProjSelectorModal from "./components/ProjSelectorModal.jsx";
 import ReferentielModal from "./components/ReferentielModal.jsx";
+import { sb } from "./supabase.js";
 
 const EMPTY_ST = {
   MO_MODE: {},
@@ -44,6 +45,20 @@ const EMPTY_ST = {
   LINE_OPEN: {},
   lotOpen: {},
   metierOpen: {},
+};
+
+const ST_PERSIST_KEYS = [
+  "MO_J", "MO_TX", "MO_MODE", "MO_FORF", "MO_NB", "MO_DEP",
+  "MAT_GAMME", "MAT_PRIX", "MAT_QTY", "MAT_DIM", "MAT_DIM_M2",
+  "NOTES", "MARGE_MODE", "MARGE_VAL", "IMPREVU_MODE", "IMPREVU_VAL"
+];
+
+const extractPersistST = (st) => {
+  const out = {};
+  ST_PERSIST_KEYS.forEach((k) => {
+    if (st[k] && Object.keys(st[k]).length) out[k] = st[k];
+  });
+  return out;
 };
 
 function normalizeProject(proj, fallbackClient) {
@@ -137,11 +152,16 @@ export default function App() {
 
     (async () => {
       let data = null;
-      try {
-        const r = await cache.get(PROJECT.storeKey);
-        if (r?.value) data = JSON.parse(r.value);
-      } catch (e) {}
-
+      const fromList = projectsList.find((p) => p.store_key === PROJECT.storeKey);
+      if (fromList?.st_json && Object.keys(fromList.st_json).length) {
+        data = {ST: fromList.st_json};
+      }
+      if (!data) {
+        try {
+          const r = await cache.get(PROJECT.storeKey);
+          if (r?.value) data = JSON.parse(r.value);
+        } catch (e) {}
+      }
       if (!data) {
         try {
           const r = localStorage.getItem(PROJECT.storeKey);
@@ -197,7 +217,7 @@ export default function App() {
         }
       }
     })();
-  }, [PROJECT]);
+  }, [PROJECT, projectsList]);
 
   const handleProjectCreated = useCallback((proj) => {
     setShowNewProj(false);
@@ -288,6 +308,13 @@ export default function App() {
     setVersions(nv);
     setActiveVer(ver.id);
     const mode = await saveData(nv, ver.id, st);
+    try {
+      await sb.from("bl_projects")
+        .update({st_json: extractPersistST(st)})
+        .eq("store_key", PROJECT.storeKey);
+    } catch (e) {
+      console.warn("st_json save failed:", e);
+    }
     showToast(mode === "storage" ? `✅ v${n} sauvegardée` : mode === "local" ? `✅ v${n} (localStorage)` : "⚠️ Sauvegarde indisponible");
   }, [st, versions, saveData, showToast, PROJECT]);
 

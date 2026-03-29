@@ -20,7 +20,7 @@ export const cache = {
 export async function loadProjectsList() {
   const { data, error } = await sb
     .from('bl_projects')
-    .select('id, client_nom, adresse, tva, date_visite, validite, store_key, statut, projet_json')
+    .select('id, client_nom, adresse, tva, date_visite, validite, store_key, statut, projet_json, st_json')
     .order('created_at', { ascending: false });
   if (error) throw error;
   return data || [];
