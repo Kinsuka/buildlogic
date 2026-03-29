@@ -8,9 +8,9 @@ Ce fichier contient tout ce qu'il faut pour reprendre le développement sans fri
 ## Identité du projet
 
 - **Produit** : BuildLogic — outil de budgétisation chantier pour ONA Group SRL (Bruxelles/Brabant)
-- **Stack** : React 18 + Vite · Supabase JS direct · Netlify CI/CD
+- **Stack** : React 18 + Vite · Supabase JS direct · GitHub Pages CI/CD
 - **Repo** : https://github.com/Kinsuka/buildlogic
-- **App** : https://buildlogic-ona.netlify.app
+- **App** : https://kinsuka.github.io/buildlogic/
 - **Supabase project ID** : `abbaqmjidclmmwqcutlj`
 
 ---
@@ -18,7 +18,7 @@ Ce fichier contient tout ce qu'il faut pour reprendre le développement sans fri
 ## Architecture
 
 ```
-GitHub (src/) → Netlify (npm run build → dist/) → React + Supabase JS < 300ms
+GitHub (src/) → GitHub Actions (npm run build → dist/) → GitHub Pages < 300ms
 Claude (conversation) → MCP Supabase → INSERT bl_* → triggers → projet_json → BuildLogic charge
 ```
 
@@ -138,10 +138,34 @@ SELECT refresh_projet_json('UUID_DU_PROJET');
 ```sql
 metier          TEXT UNIQUE  -- 'Carreleur', 'Plombier', etc.
 icon            TEXT
-prix_lo/sug/hi  NUMERIC      -- €/jour
+prix_lo         NUMERIC      -- €/jour minimum
+prix_sug        NUMERIC      -- €/jour suggéré
+prix_hi         NUMERIC      -- €/jour maximum
 note            TEXT
 coeff_collectif NUMERIC      -- efficacité collective (0.75 à 0.95)
+tx_h_lo         NUMERIC      -- ⚡ NOUVEAU — tarif horaire minimum BE 2026 HTVA
+tx_h_hi         NUMERIC      -- ⚡ NOUVEAU — tarif horaire maximum BE 2026 HTVA
+source_tarif    TEXT         -- ⚡ NOUVEAU — source (trustup.be, tafsquare.com...)
 ```
+
+**Tarifs journaliers validés 2026 (sources belges trustup.be / tafsquare.com) :**
+
+| Métier | lo €/j | sug €/j | hi €/j | €/h BE |
+|---|---|---|---|---|
+| Maçon | 320 | 400 | 560 | 40–70 |
+| Plombier | 400 | 480 | 640 | 50–80 |
+| Électricien | 280 | 360 | 440 | 35–55 |
+| Carreleur | 250 | 320 | 400 | 30–50 |
+| Plafonneur | 280 | 360 | 440 | 35–55 |
+| Menuisier | 280 | 380 | 480 | 35–60 |
+| Peintre | 240 | 300 | 380 | 30–48 |
+| Couvreur | 320 | 420 | 560 | 40–70 |
+| Chauffagiste | 400 | 500 | 640 | 50–80 |
+| Parqueteur | 240 | 320 | 420 | 30–53 |
+| Façadier | 260 | 340 | 440 | 33–55 |
+| Démolisseur | 250 | 320 | 400 | 31–50 |
+| Technicien VMC | 360 | 460 | 580 | 45–73 |
+| Cuisiniste | 260 | 340 | 440 | 33–55 |
 
 **Coefficients collectif par métier :**
 Peintre 0.95 · Démolisseur 0.92 · Carreleur/Parqueteur 0.90 · Façadier 0.88
@@ -245,7 +269,8 @@ SELECT refresh_projet_json('UUID_PROJET');
 git add src/App.jsx
 git commit -m "description courte"
 git push
-# → Netlify déploie automatiquement en ~2 min
+# → GitHub Actions build + déploie sur GitHub Pages automatiquement (~2 min)
+# → URL : https://kinsuka.github.io/buildlogic/
 ```
 
 **Règle absolue** : modifications chirurgicales uniquement. Ne jamais reconstruire le fichier entier.
@@ -275,5 +300,6 @@ git push
 - Documentation intégrée (6 onglets)
 - Patch notes intégrées
 - ErrorBoundary + guards null sur sequence, props, st
+- Tarifs horaires BE 2026 dans référentiel (colonne €/h)
 
-*Dernière mise à jour : 28 mars 2026*
+*Dernière mise à jour : 28 mars 2026 — migration GitHub Pages + tarifs MO 2026 validés*
