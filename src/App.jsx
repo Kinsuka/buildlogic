@@ -21,6 +21,7 @@ import HowToStartModal from "./components/HowToStartModal.jsx";
 import DocumentationModal from "./components/DocumentationModal.jsx";
 import ProjSelectorModal from "./components/ProjSelectorModal.jsx";
 import ReferentielModal from "./components/ReferentielModal.jsx";
+import ProjectChatPanel from "./components/ProjectChatPanel.jsx";
 import { sb } from "./supabase.js";
 
 const EMPTY_ST = {
@@ -93,6 +94,7 @@ export default function App() {
   const [versions, setVersions] = useState([]);
   const [activeVer, setActiveVer] = useState(null);
   const [dark, setDark] = useState(() => localStorage.getItem("ona_dark") === "1");
+  const [showProjChat, setShowProjChat] = useState(false);
   const [focus, setFocus] = useState(false);
   const [cMode, setCMode] = useState(false);
   const [gammes, setGammes] = useState(false);
@@ -221,9 +223,10 @@ export default function App() {
 
   const handleProjectCreated = useCallback((proj) => {
     setShowNewProj(false);
+    setShowProjChat(false);
     setPROJECT(proj);
     setProjectsList([]);
-    showToast(`✅ Projet ${proj.client} créé`);
+    showToast(`✅ Projet ${proj.client || proj.client_nom} créé`);
   }, [showToast]);
 
   const handleRefreshList = useCallback(async () => {
@@ -259,6 +262,7 @@ export default function App() {
     setProjError(null);
 
     try {
+      setShowProjChat(false);
       const fromList = projectsList.find((p) => p.id === projectId);
       if (fromList?.projet_json) {
         const proj = normalizeProject(fromList.projet_json, fromList.client_nom || clientNom);
@@ -487,6 +491,22 @@ export default function App() {
               <button onClick={handleOpenSelector} style={{padding:"5px 12px",fontSize:11,fontWeight:500,border:"1px solid var(--bd3)",borderRadius:6,background:"var(--sf)",color:"var(--tx2)",cursor:"pointer",height:30}}>📁 Changer</button>
               <span style={{fontSize:11,color:"var(--tx3)",background:"#eee",borderRadius:8,padding:"2px 8px",border:"1px solid var(--bd2)"}}>{PROJECT.adresse}</span>
               <button onClick={handleSave} style={{padding:"5px 12px",fontSize:12,fontWeight:500,border:"none",borderRadius:6,background:"var(--bbg)",color:"var(--btx)",cursor:"pointer",height:30}}>💾 Sauvegarder</button>
+              <button
+                onClick={() => setShowProjChat((current) => !current)}
+                style={{
+                  padding: "5px 12px",
+                  fontSize: 12,
+                  fontWeight: 500,
+                  height: 30,
+                  cursor: "pointer",
+                  borderRadius: 6,
+                  border: `1px solid ${showProjChat ? "var(--gtx)" : "var(--bd3)"}`,
+                  background: showProjChat ? "var(--gbg)" : "var(--sf)",
+                  color: showProjChat ? "var(--gtx)" : "var(--tx)",
+                }}
+              >
+                💬 Assistant
+              </button>
               <button onClick={() => setFocus((f) => !f)} style={{padding:"5px 12px",fontSize:12,fontWeight:500,border:`1px solid ${focus ? "#8b5cf6" : "var(--bd3)"}`,borderRadius:6,background:focus ? "#ede9fe" : "var(--sf)",color:focus ? "#7c3aed" : "var(--tx)",cursor:"pointer",height:30,transition:"all .15s"}}>{focus ? "🎯 Focus" : "⊙ Focus"}</button>
               <button onClick={() => setShowR(true)} style={{padding:"5px 12px",fontSize:12,fontWeight:500,border:"1px solid var(--amb)",borderRadius:6,background:"var(--sf)",color:"var(--amb)",cursor:"pointer",height:30}}>📋 Rapport</button>
 
@@ -577,6 +597,7 @@ export default function App() {
       {showC && PROJECT && <FicheClientModal st={st} onClose={() => setShowC(false)} PROJECT={PROJECT} />}
       {showProjSelector && <ProjSelectorModal onClose={() => setShowProjSelector(false)} projListLoading={projListLoading} projectsList={projectsList} onLoadProject={handleLoadProject} onRefresh={handleRefreshList} />}
       {showNewProj && <NewProjectModal onClose={() => setShowNewProj(false)} onCreated={handleProjectCreated} />}
+      {showProjChat && PROJECT && <ProjectChatPanel PROJECT={PROJECT} onClose={() => setShowProjChat(false)} />}
       {showHowTo && <HowToStartModal onClose={() => setShowHowTo(false)} />}
       {showDoc && <DocumentationModal onClose={() => setShowDoc(false)} />}
       <Toast msg={toast} />
