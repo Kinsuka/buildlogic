@@ -1,7 +1,12 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import {
+  createEmptyAssistantState,
+  mergeAssistantState,
+  normalizeAssistantState,
+} from "../lib/assistantState.js";
 import { buildProjectAssistantSystem, callLLM } from "../lib/llm.js";
 
-export default function ProjectChatPanel({PROJECT, onClose}) {
+export default function ProjectChatPanel({PROJECT, assistantState: initialAssistantState, onAssistantStateChange, onClose}) {
   const [messages, setMessages] = useState([
     {
       role: "assistant",
@@ -10,10 +15,25 @@ export default function ProjectChatPanel({PROJECT, onClose}) {
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [assistantState, setAssistantState] = useState(() =>
+    normalizeAssistantState(initialAssistantState, "project_chat")
+  );
 
   const provider = localStorage.getItem("ona_api_provider") || "mistral";
   const apiKey = localStorage.getItem(`ona_api_key_${provider}`) || "";
   const system = useMemo(() => buildProjectAssistantSystem(PROJECT), [PROJECT]);
+
+  useEffect(() => {
+    setAssistantState(normalizeAssistantState(initialAssistantState, "project_chat"));
+  }, [initialAssistantState, PROJECT.storeKey]);
+
+  const updateAssistantState = (patch) => {
+    setAssistantState((current) => {
+      const next = mergeAssistantState(current || createEmptyAssistantState("project_chat"), patch);
+      onAssistantStateChange?.(next);
+      return next;
+    });
+  };
 
   const send = async () => {
     if (!input.trim() || loading) return;
@@ -36,8 +56,20 @@ export default function ProjectChatPanel({PROJECT, onClose}) {
 
     setLoading(true);
     try {
-      const reply = await callLLM(nextMessages.slice(1), system, provider, apiKey);
+      const llmMessages = nextMessages.slice(1);
+      const reply = await callLLM(llmMessages, system, provider, apiKey, {
+        feature: "project_chat",
+        phase: "advice",
+        turn: llmMessages.filter((message) => message.role === "user").length,
+      });
       setMessages([...nextMessages, {role: "assistant", content: reply}]);
+      updateAssistantState({
+        phase: "advice",
+        turn: llmMessages.filter((message) => message.role === "user").length,
+        last_user_answer: userMsg.content,
+        last_question: reply,
+        ready_to_generate: false,
+      });
     } catch (e) {
       setMessages([...nextMessages, {role: "assistant", content: `Erreur: ${e.message}`}]);
     }
@@ -179,6 +211,13 @@ export default function ProjectChatPanel({PROJECT, onClose}) {
           →
         </button>
       </div>
+
+      {import.meta.env.DEV && (
+        <details style={{margin: "0 14px 12px", fontSize: 11, color: "var(--tx2)", background: "var(--sf2)", border: "1px solid var(--bd3)", borderRadius: 8, padding: "10px 12px"}}>
+          <summary style={{cursor: "pointer", fontWeight: 600}}>assistant_state debug</summary>
+          <pre style={{margin: "10px 0 0", whiteSpace: "pre-wrap"}}>{JSON.stringify(assistantState, null, 2)}</pre>
+        </details>
+      )}
     </div>
   );
 }

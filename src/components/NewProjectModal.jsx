@@ -1,4 +1,10 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import {
+  ASSISTANT_STATE_KEYS,
+  createEmptyAssistantState,
+  mergeAssistantState,
+  normalizeAssistantState,
+} from "../lib/assistantState.js";
 import { createProject } from "../lib/projects.js";
 import { buildONASystemPrompt, callLLM, extractSQL } from "../lib/llm.js";
 import { Modal } from "./Modal.jsx";
@@ -14,6 +20,8 @@ const PROVIDER_LINKS = {
   openai: "https://platform.openai.com/api-keys",
   mistral: "https://console.mistral.ai/api-keys",
 };
+
+const WIZARD_ASSISTANT_STORAGE_KEY = `ona_${ASSISTANT_STATE_KEYS.newProjectWizard}`;
 
 function extractChoiceOptions(text) {
   if (!text) return [];
@@ -91,6 +99,14 @@ export default function NewProjectModal({onClose, onCreated}) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [selectedChoices, setSelectedChoices] = useState([]);
+  const [assistantState, setAssistantState] = useState(() => {
+    try {
+      const raw = localStorage.getItem(WIZARD_ASSISTANT_STORAGE_KEY);
+      return normalizeAssistantState(raw ? JSON.parse(raw) : null, "new_project_wizard");
+    } catch (_) {
+      return createEmptyAssistantState("new_project_wizard");
+    }
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [sqlPreview, setSqlPreview] = useState("");
@@ -159,6 +175,17 @@ export default function NewProjectModal({onClose, onCreated}) {
     [currentAssistantMessage]
   );
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(WIZARD_ASSISTANT_STORAGE_KEY, JSON.stringify(assistantState));
+    } catch (_) {}
+  }, [assistantState]);
+
+  useEffect(() => {
+    if (mode !== "ai") return;
+    setAssistantState((current) => mergeAssistantState(current, {phase: step}));
+  }, [mode, step]);
+
   const toggleChoice = (choice) => {
     setSelectedChoices((current) =>
       current.includes(choice) ? current.filter((item) => item !== choice) : [...current, choice]
@@ -169,6 +196,10 @@ export default function NewProjectModal({onClose, onCreated}) {
     if (!remember) return;
     localStorage.setItem("ona_api_provider", provider);
     localStorage.setItem(`ona_api_key_${provider}`, apiKey);
+  };
+
+  const updateAssistantState = (patch) => {
+    setAssistantState((current) => mergeAssistantState(current, patch));
   };
 
   const analyzeRapport = async () => {
@@ -184,10 +215,21 @@ export default function NewProjectModal({onClose, onCreated}) {
         role: "user",
         content: `Voici le rapport de visite :\n\n${rapport}\n\nAnalyse-le et pose ta premiere question.`,
       };
-      const reply = await callLLM([firstMsg], system, provider, apiKey);
+      const reply = await callLLM([firstMsg], system, provider, apiKey, {
+        feature: "project_wizard",
+        phase: "initial_analysis",
+        turn: 1,
+      });
       setMessages([firstMsg, {role: "assistant", content: reply}]);
       setSelectedChoices([]);
       setInput("");
+      updateAssistantState({
+        phase: "chat",
+        turn: 1,
+        last_user_answer: rapport,
+        last_question: reply,
+        ready_to_generate: false,
+      });
       setStep("chat");
     } catch (e) {
       setError(e.message);
@@ -212,9 +254,20 @@ export default function NewProjectModal({onClose, onCreated}) {
 
     try {
       const system = await buildONASystemPrompt();
-      const reply = await callLLM(nextMessages, system, provider, apiKey);
+      const reply = await callLLM(nextMessages, system, provider, apiKey, {
+        feature: "project_wizard",
+        phase: "clarification",
+        turn: nextMessages.filter((message) => message.role === "user").length,
+      });
       const nextWithReply = [...nextMessages, {role: "assistant", content: reply}];
       setMessages(nextWithReply);
+      updateAssistantState({
+        phase: "chat",
+        turn: nextMessages.filter((message) => message.role === "user").length,
+        last_user_answer: content,
+        last_question: reply,
+        ready_to_generate: false,
+      });
 
       const sql = extractSQL(reply);
       if (sql) setSqlPreview(sql);
@@ -245,15 +298,31 @@ ${firstError.message}
 Corrige le SQL pour respecter STRICTEMENT le schema ONA.
 Renvoie uniquement un bloc \`\`\`sql ... \`\`\` complet et corrige.`,
         };
-        const repairReply = await callLLM([...messages, repairPrompt], system, provider, apiKey);
+        const repairReply = await callLLM([...messages, repairPrompt], system, provider, apiKey, {
+          feature: "project_wizard",
+          phase: "sql_repair",
+          turn: messages.filter((message) => message.role === "user").length + 1,
+        });
         const repairedSQL = extractSQL(repairReply);
         if (!repairedSQL) throw firstError;
         setSqlPreview(repairedSQL);
+        updateAssistantState({
+          phase: "sql_repair",
+          last_question: "SQL repair requested",
+          ready_to_generate: false,
+        });
         data = await executeProjectSQL(repairedSQL);
       }
 
       const project = shapeCreatedProject(data.projet);
       if (!project) throw new Error("Projet cree mais payload incomplet.");
+      updateAssistantState({
+        phase: "completed",
+        ready_to_generate: false,
+      });
+      try {
+        localStorage.removeItem(WIZARD_ASSISTANT_STORAGE_KEY);
+      } catch (_) {}
       onCreated(project);
     } catch (e) {
       setError(e.message);
@@ -281,12 +350,13 @@ Renvoie uniquement un bloc \`\`\`sql ... \`\`\` complet et corrige.`,
 
   return (
     <Modal title={header.title} sub={header.sub} onClose={onClose} maxWidth={580}>
-      <div style={{padding: "18px 20px", display: "flex", flexDirection: "column", gap: 14}}>
+      <div data-testid="new-project-modal" style={{padding: "18px 20px", display: "flex", flexDirection: "column", gap: 14}}>
         {mode === "manual" && (
           <div style={{display: "flex", flexDirection: "column", gap: 14}}>
             <div>
               <label style={lbl}>Nom du client *</label>
               <input
+                data-testid="manual-client-name-input"
                 autoFocus
                 value={clientNom}
                 onChange={(e) => setClientNom(e.target.value)}
@@ -299,6 +369,7 @@ Renvoie uniquement un bloc \`\`\`sql ... \`\`\` complet et corrige.`,
             <div>
               <label style={lbl}>Adresse du bien</label>
               <input
+                data-testid="manual-address-input"
                 value={adresse}
                 onChange={(e) => setAdresse(e.target.value)}
                 placeholder="ex : Rue de la Paix 12, 1000 Bruxelles"
@@ -309,7 +380,7 @@ Renvoie uniquement un bloc \`\`\`sql ... \`\`\` complet et corrige.`,
             <div style={{display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10}}>
               <div>
                 <label style={lbl}>TVA %</label>
-                <select value={tva} onChange={(e) => setTva(Number(e.target.value))} style={{...inp, paddingRight: 24}}>
+                <select data-testid="manual-tva-select" value={tva} onChange={(e) => setTva(Number(e.target.value))} style={{...inp, paddingRight: 24}}>
                   <option value={6}>6%</option>
                   <option value={21}>21%</option>
                 </select>
@@ -317,12 +388,13 @@ Renvoie uniquement un bloc \`\`\`sql ... \`\`\` complet et corrige.`,
 
               <div>
                 <label style={lbl}>Date visite</label>
-                <input type="date" value={dateVisite} onChange={(e) => setDateVisite(e.target.value)} style={inp} />
+                <input data-testid="manual-date-input" type="date" value={dateVisite} onChange={(e) => setDateVisite(e.target.value)} style={inp} />
               </div>
 
               <div>
                 <label style={lbl}>Validite (j)</label>
                 <input
+                  data-testid="manual-validite-input"
                   type="number"
                   value={validite}
                   min={1}
@@ -355,6 +427,7 @@ Renvoie uniquement un bloc \`\`\`sql ... \`\`\` complet et corrige.`,
                     }}
                   >
                     <input
+                      data-testid={`provider-${key}`}
                       type="radio"
                       name="provider"
                       value={key}
@@ -380,7 +453,7 @@ Renvoie uniquement un bloc \`\`\`sql ... \`\`\` complet et corrige.`,
                   → Obtenir une cle
                 </a>
               </label>
-              <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-..." style={inp} />
+              <input data-testid="assistant-api-key-input" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-..." style={inp} />
             </div>
 
             <label style={{display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--tx2)", cursor: "pointer"}}>
@@ -392,6 +465,7 @@ Renvoie uniquement un bloc \`\`\`sql ... \`\`\` complet et corrige.`,
 
         {mode === "ai" && step === "rapport" && (
           <textarea
+            data-testid="wizard-rapport-input"
             value={rapport}
             onChange={(e) => setRapport(e.target.value)}
             placeholder="Colle ici le rapport de visite complet..."
@@ -445,8 +519,9 @@ Renvoie uniquement un bloc \`\`\`sql ... \`\`\` complet et corrige.`,
 
             {quickChoices.length > 0 && !sqlPreview && (
               <div style={{display: "flex", flexWrap: "wrap", gap: 8}}>
-                {quickChoices.map((choice) => (
+                {quickChoices.map((choice, index) => (
                   <button
+                    data-testid={`assistant-choice-${index}`}
                     key={choice}
                     onClick={() => toggleChoice(choice)}
                     disabled={loading}
@@ -470,6 +545,7 @@ Renvoie uniquement un bloc \`\`\`sql ... \`\`\` complet et corrige.`,
             {!sqlPreview && (
               <>
                 <input
+                  data-testid="assistant-free-text-input"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendMessage()}
@@ -479,6 +555,7 @@ Renvoie uniquement un bloc \`\`\`sql ... \`\`\` complet et corrige.`,
                 />
                 <div style={{display: "flex", justifyContent: "flex-end"}}>
                   <button
+                    data-testid="assistant-next-button"
                     onClick={() => sendMessage()}
                     disabled={loading || (!input.trim() && selectedChoices.length === 0)}
                     style={{
@@ -509,6 +586,13 @@ Renvoie uniquement un bloc \`\`\`sql ... \`\`\` complet et corrige.`,
         )}
 
         {error && <div style={{fontSize: 12, color: "var(--rtx)", padding: "8px 12px", background: "var(--rbg)", borderRadius: 6}}>{error}</div>}
+
+        {import.meta.env.DEV && (
+          <details style={{fontSize: 11, color: "var(--tx2)", background: "var(--sf2)", border: "1px solid var(--bd3)", borderRadius: 8, padding: "10px 12px"}}>
+            <summary style={{cursor: "pointer", fontWeight: 600}}>assistant_state debug</summary>
+            <pre style={{margin: "10px 0 0", whiteSpace: "pre-wrap"}}>{JSON.stringify(assistantState, null, 2)}</pre>
+          </details>
+        )}
       </div>
 
       <div style={{display: "flex", gap: 8, padding: "12px 20px 18px", justifyContent: "space-between", borderTop: "1px solid var(--bd)"}}>
@@ -596,6 +680,7 @@ Renvoie uniquement un bloc \`\`\`sql ... \`\`\` complet et corrige.`,
               </button>
               {sqlPreview && (
                 <button
+                  data-testid="assistant-create-project-button"
                   onClick={createProjectAI}
                   disabled={creating}
                   style={{
@@ -624,6 +709,7 @@ Renvoie uniquement un bloc \`\`\`sql ... \`\`\` complet et corrige.`,
                 Annuler
               </button>
               <button
+                data-testid="manual-create-project-button"
                 onClick={handleManualSubmit}
                 disabled={loading}
                 style={{

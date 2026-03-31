@@ -17,8 +17,8 @@ export default function LineCardMO({lk,mid,l,st,setST,allMO,allMAT,clientMode}) 
     } else { upd(n=>{n.LINE_OPEN={...n.LINE_OPEN,[lkey]:!open};}); }
   };
   return (
-    <div style={{border:"1px solid var(--bd)",borderRadius:8,marginTop:8,overflow:"hidden"}}>
-      <div onClick={toggle} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 12px",background:"var(--sf)",cursor:clientMode?"default":"pointer",userSelect:"none"}}
+    <div data-testid={`mo-line-${nk}`} style={{border:"1px solid var(--bd)",borderRadius:8,marginTop:8,overflow:"hidden"}}>
+      <div data-testid={`mo-line-toggle-${nk}`} onClick={toggle} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 12px",background:"var(--sf)",cursor:clientMode?"default":"pointer",userSelect:"none"}}
         onMouseEnter={e=>{if(!clientMode)e.currentTarget.style.filter="brightness(.97)";}}
         onMouseLeave={e=>e.currentTarget.style.filter=""}>
         <div style={{display:"flex",alignItems:"center",flex:1,minWidth:0}}>
@@ -34,20 +34,20 @@ export default function LineCardMO({lk,mid,l,st,setST,allMO,allMAT,clientMode}) 
         <div style={{display:"flex",alignItems:"flex-end",gap:8,padding:"7px 12px 9px",background:"var(--sf3)",borderTop:"1px solid var(--bd)",flexWrap:"wrap"}}>
           <div style={{display:"flex",flexDirection:"column",gap:3}}>
             <label style={{fontSize:10,fontWeight:500,color:"var(--tx3)",textTransform:"uppercase",letterSpacing:".03em"}}>Mode</label>
-            <select value={mode} onChange={e=>upd(n=>{n.MO_MODE={...n.MO_MODE,[nk]:e.target.value};})} style={{width:110,fontSize:12,height:26,padding:"0 6px",border:"1px solid var(--bd3)",borderRadius:5,background:"var(--sf)",color:"var(--tx)"}}>
+            <select data-testid={`mo-mode-${nk}`} value={mode} onChange={e=>upd(n=>{n.MO_MODE={...n.MO_MODE,[nk]:e.target.value};})} style={{width:110,fontSize:12,height:26,padding:"0 6px",border:"1px solid var(--bd3)",borderRadius:5,background:"var(--sf)",color:"var(--tx)"}}>
               <option value="jours">Jours × tarif</option><option value="forfait">Forfait global</option>
             </select>
           </div>
           <div style={{width:1,height:22,background:"var(--bd)",alignSelf:"flex-end",flexShrink:0}}/>
           {mode==="jours"?<>
-            <div style={{display:"flex",flexDirection:"column",gap:3}}><label style={{fontSize:10,fontWeight:500,color:"var(--tx3)",textTransform:"uppercase",letterSpacing:".03em"}}>Jours</label><input type="number" step={0.25} value={j} onChange={e=>upd(n=>{n.MO_J={...n.MO_J,[nk]:parseFloat(e.target.value)||0};})} style={{width:48,fontSize:12,height:26,textAlign:"right",border:"1px solid var(--bd3)",borderRadius:5,background:"var(--sf)",color:"var(--tx)",padding:"0 6px"}}/></div>
+            <div style={{display:"flex",flexDirection:"column",gap:3}}><label style={{fontSize:10,fontWeight:500,color:"var(--tx3)",textTransform:"uppercase",letterSpacing:".03em"}}>Jours</label><input data-testid={`mo-jours-${nk}`} type="number" step={0.25} value={j} onChange={e=>upd(n=>{n.MO_J={...n.MO_J,[nk]:parseFloat(e.target.value)||0};})} style={{width:48,fontSize:12,height:26,textAlign:"right",border:"1px solid var(--bd3)",borderRadius:5,background:"var(--sf)",color:"var(--tx)",padding:"0 6px"}}/></div>
             <span style={{fontSize:11,color:"var(--tx3)",alignSelf:"flex-end",paddingBottom:3}}>×</span>
-            <div style={{display:"flex",flexDirection:"column",gap:3}}><label style={{fontSize:10,fontWeight:500,color:"var(--tx3)",textTransform:"uppercase",letterSpacing:".03em"}}>Tarif/j</label><input type="number" step={10} value={tx} onChange={e=>upd(n=>{n.MO_TX={...n.MO_TX,[nk]:parseFloat(e.target.value)||0};})} style={{width:62,fontSize:12,height:26,textAlign:"right",border:"1px solid var(--bd3)",borderRadius:5,background:"var(--sf)",color:"var(--tx)",padding:"0 6px"}}/></div>
+            <div style={{display:"flex",flexDirection:"column",gap:3}}><label style={{fontSize:10,fontWeight:500,color:"var(--tx3)",textTransform:"uppercase",letterSpacing:".03em"}}>Tarif/j</label><input data-testid={`mo-tarif-${nk}`} type="number" step={10} value={tx} onChange={e=>upd(n=>{n.MO_TX={...n.MO_TX,[nk]:parseFloat(e.target.value)||0};})} style={{width:62,fontSize:12,height:26,textAlign:"right",border:"1px solid var(--bd3)",borderRadius:5,background:"var(--sf)",color:"var(--tx)",padding:"0 6px"}}/></div>
             <span style={{fontSize:11,color:"var(--tx3)",alignSelf:"flex-end",paddingBottom:3}}>€/j</span>
             <div style={{width:1,height:22,background:"var(--bd)",alignSelf:"flex-end",flexShrink:0}}/>
             <div style={{display:"flex",flexDirection:"column",gap:3}}>
               <label style={{fontSize:10,fontWeight:500,color:"var(--tx3)",textTransform:"uppercase",letterSpacing:".03em"}}>Travailleurs</label>
-              <select value={nb} onChange={e=>upd(n=>{n.MO_NB={...n.MO_NB,[nk]:parseInt(e.target.value)||1};})}
+              <select data-testid={`mo-workers-${nk}`} value={nb} onChange={e=>upd(n=>{n.MO_NB={...n.MO_NB,[nk]:parseInt(e.target.value)||1};})}
                 style={{width:52,fontSize:12,height:26,padding:"0 4px",border:"1px solid var(--bd3)",borderRadius:5,background:"var(--sf)",color:"var(--tx)"}}>
                 {[1,2,3,4].map(v=><option key={v} value={v}>{v}</option>)}
               </select>
@@ -56,7 +56,7 @@ export default function LineCardMO({lk,mid,l,st,setST,allMO,allMAT,clientMode}) 
               <div style={{width:1,height:22,background:"var(--bd)",alignSelf:"flex-end",flexShrink:0}}/>
               <div style={{display:"flex",flexDirection:"column",gap:3}}>
                 <label style={{fontSize:10,fontWeight:500,color:"var(--tx3)",textTransform:"uppercase",letterSpacing:".03em"}}>Dép./trav./j</label>
-                <input type="number" step={5} value={st.MO_DEP[nk]??0}
+                <input data-testid={`mo-dep-${nk}`} type="number" step={5} value={st.MO_DEP[nk]??0}
                   placeholder="0"
                   onChange={e=>upd(n=>{n.MO_DEP={...n.MO_DEP,[nk]:parseFloat(e.target.value)||0};})}
                   style={{width:52,fontSize:12,height:26,textAlign:"right",border:"1px solid var(--bd3)",borderRadius:5,background:"var(--sf)",color:"var(--tx)",padding:"0 6px"}}/>
@@ -69,7 +69,7 @@ export default function LineCardMO({lk,mid,l,st,setST,allMO,allMAT,clientMode}) 
               </div>
             </>}
           </>:<>
-            <div style={{display:"flex",flexDirection:"column",gap:3}}><label style={{fontSize:10,fontWeight:500,color:"var(--tx3)",textTransform:"uppercase",letterSpacing:".03em"}}>Forfait HT</label><input type="number" step={50} value={forf} placeholder="0" onChange={e=>upd(n=>{n.MO_FORF={...n.MO_FORF,[nk]:parseFloat(e.target.value)||0};})} style={{width:80,fontSize:12,height:26,textAlign:"right",border:"1px solid var(--bd3)",borderRadius:5,background:"var(--sf)",color:"var(--tx)",padding:"0 6px"}}/></div>
+            <div style={{display:"flex",flexDirection:"column",gap:3}}><label style={{fontSize:10,fontWeight:500,color:"var(--tx3)",textTransform:"uppercase",letterSpacing:".03em"}}>Forfait HT</label><input data-testid={`mo-forfait-${nk}`} type="number" step={50} value={forf} placeholder="0" onChange={e=>upd(n=>{n.MO_FORF={...n.MO_FORF,[nk]:parseFloat(e.target.value)||0};})} style={{width:80,fontSize:12,height:26,textAlign:"right",border:"1px solid var(--bd3)",borderRadius:5,background:"var(--sf)",color:"var(--tx)",padding:"0 6px"}}/></div>
             <span style={{fontSize:11,color:"var(--tx3)",alignSelf:"flex-end",paddingBottom:3}}>€</span>
           </>}
           <span style={{fontSize:10,color:"var(--tx3)",background:"var(--sf)",border:"1px solid var(--bd)",borderRadius:8,padding:"3px 8px",whiteSpace:"nowrap",alignSelf:"flex-end",marginLeft:"auto"}}>Réf. {l.txRef.lo}–{l.txRef.hi} €/j</span>

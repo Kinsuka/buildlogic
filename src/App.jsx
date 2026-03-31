@@ -8,6 +8,7 @@ import { GL, fmt, moLV, matLV, metierTotal, lotTotals, grandTotalGamme, makeInit
 import { cache, loadProjectsList, loadProject } from "./lib/projects.js";
 import { APP_CSS } from "./lib/appCss.js";
 import { REFERENTIEL_SNAPSHOT } from "./lib/referentielSnapshot.js";
+import { ASSISTANT_STATE_KEYS } from "./lib/assistantState.js";
 import Toast from "./components/Toast.jsx";
 import BtnMenu from "./components/BtnMenu.jsx";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
@@ -46,12 +47,14 @@ const EMPTY_ST = {
   LINE_OPEN: {},
   lotOpen: {},
   metierOpen: {},
+  assistant: {},
 };
 
 const ST_PERSIST_KEYS = [
   "MO_J", "MO_TX", "MO_MODE", "MO_FORF", "MO_NB", "MO_DEP",
   "MAT_GAMME", "MAT_PRIX", "MAT_QTY", "MAT_DIM", "MAT_DIM_M2",
-  "NOTES", "MARGE_MODE", "MARGE_VAL", "IMPREVU_MODE", "IMPREVU_VAL"
+  "NOTES", "MARGE_MODE", "MARGE_VAL", "IMPREVU_MODE", "IMPREVU_VAL",
+  "assistant"
 ];
 
 const extractPersistST = (st) => {
@@ -201,6 +204,7 @@ export default function App() {
                 "LINE_OPEN",
                 "lotOpen",
                 "metierOpen",
+                "assistant",
               ];
 
               validKeys.forEach((k) => {
@@ -299,6 +303,29 @@ export default function App() {
     } catch (e) {}
     return null;
   }, [PROJECT]);
+
+  const persistProjectAssistantState = useCallback(async (assistantState) => {
+    if (!PROJECT) return;
+
+    const nextST = {
+      ...st,
+      assistant: {
+        ...(st.assistant || {}),
+        [ASSISTANT_STATE_KEYS.projectChat.split(".").pop()]: assistantState,
+      },
+    };
+
+    setST(nextST);
+    await saveData(versions, activeVer, nextST);
+
+    try {
+      await sb.from("bl_projects")
+        .update({st_json: extractPersistST(nextST)})
+        .eq("store_key", PROJECT.storeKey);
+    } catch (e) {
+      console.warn("assistant_state save failed:", e);
+    }
+  }, [PROJECT, activeVer, saveData, st, versions]);
 
   const handleSave = useCallback(async () => {
     if (!PROJECT) return;
@@ -436,7 +463,7 @@ export default function App() {
       <style>{APP_CSS}</style>
 
       {!PROJECT && (
-        <div style={{maxWidth:520,margin:"0 auto",padding:"4rem 1.5rem",display:"flex",flexDirection:"column",alignItems:"center",textAlign:"center"}}>
+        <div data-testid="app-home" style={{maxWidth:520,margin:"0 auto",padding:"4rem 1.5rem",display:"flex",flexDirection:"column",alignItems:"center",textAlign:"center"}}>
           <div style={{fontSize:40,marginBottom:16}}>🏗</div>
           <div style={{fontSize:22,fontWeight:700,color:"var(--tx)",marginBottom:8}}>BuildLogic</div>
           <div style={{fontSize:13,color:"var(--tx3)",marginBottom:32,lineHeight:1.7}}>
@@ -448,10 +475,10 @@ export default function App() {
             <div style={{fontSize:13,color:"var(--tx3)",padding:"16px 0"}}>⏳ Chargement du projet…</div>
           ) : (
             <div style={{display:"flex",flexDirection:"column",gap:8,width:"100%",maxWidth:280}}>
-              <button onClick={handleOpenSelector} style={{padding:"12px 28px",fontSize:14,fontWeight:600,border:"none",borderRadius:8,background:"var(--btx)",color:"#fff",cursor:"pointer"}}>
+              <button data-testid="open-projects-button" onClick={handleOpenSelector} style={{padding:"12px 28px",fontSize:14,fontWeight:600,border:"none",borderRadius:8,background:"var(--btx)",color:"#fff",cursor:"pointer"}}>
                 📁 Charger un projet
               </button>
-              <button onClick={() => setShowNewProj(true)} style={{padding:"10px 28px",fontSize:13,fontWeight:500,border:"1px solid var(--bd3)",borderRadius:8,background:"var(--sf)",color:"var(--tx)",cursor:"pointer"}}>
+              <button data-testid="new-project-button" onClick={() => setShowNewProj(true)} style={{padding:"10px 28px",fontSize:13,fontWeight:500,border:"1px solid var(--bd3)",borderRadius:8,background:"var(--sf)",color:"var(--tx)",cursor:"pointer"}}>
                 ✚ Nouveau projet
               </button>
               <button onClick={() => setShowHowTo(true)} style={{padding:"8px 28px",fontSize:12,fontWeight:400,border:"none",borderRadius:8,background:"none",color:"var(--btx)",cursor:"pointer",textDecoration:"underline"}}>
@@ -482,16 +509,17 @@ export default function App() {
 
       {PROJECT && stProjectId === PROJECT.storeKey && (
         <ErrorBoundary storeKey={PROJECT.storeKey} onReset={() => setPROJECT(null)}>
-          <div style={{maxWidth:960,margin:"0 auto"}}>
+          <div data-testid="project-builder" style={{maxWidth:960,margin:"0 auto"}}>
             <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:"1rem",flexWrap:"wrap"}}>
-              <span style={{fontSize:15,fontWeight:600,flex:1,color:"var(--tx)"}}>
+              <span data-testid="project-title" style={{fontSize:15,fontWeight:600,flex:1,color:"var(--tx)"}}>
                 Budget {PROJECT.client}
                 {cMode && <span style={{fontSize:11,fontWeight:500,marginLeft:8,color:"var(--gtx)",background:"var(--gbg)",padding:"2px 8px",borderRadius:8}}>Vue client</span>}
               </span>
-              <button onClick={handleOpenSelector} style={{padding:"5px 12px",fontSize:11,fontWeight:500,border:"1px solid var(--bd3)",borderRadius:6,background:"var(--sf)",color:"var(--tx2)",cursor:"pointer",height:30}}>📁 Changer</button>
-              <span style={{fontSize:11,color:"var(--tx3)",background:"#eee",borderRadius:8,padding:"2px 8px",border:"1px solid var(--bd2)"}}>{PROJECT.adresse}</span>
-              <button onClick={handleSave} style={{padding:"5px 12px",fontSize:12,fontWeight:500,border:"none",borderRadius:6,background:"var(--bbg)",color:"var(--btx)",cursor:"pointer",height:30}}>💾 Sauvegarder</button>
+              <button data-testid="change-project-button" onClick={handleOpenSelector} style={{padding:"5px 12px",fontSize:11,fontWeight:500,border:"1px solid var(--bd3)",borderRadius:6,background:"var(--sf)",color:"var(--tx2)",cursor:"pointer",height:30}}>📁 Changer</button>
+              <span data-testid="project-address" style={{fontSize:11,color:"var(--tx3)",background:"#eee",borderRadius:8,padding:"2px 8px",border:"1px solid var(--bd2)"}}>{PROJECT.adresse}</span>
+              <button data-testid="save-project-button" onClick={handleSave} style={{padding:"5px 12px",fontSize:12,fontWeight:500,border:"none",borderRadius:6,background:"var(--bbg)",color:"var(--btx)",cursor:"pointer",height:30}}>💾 Sauvegarder</button>
               <button
+                data-testid="project-chat-button"
                 onClick={() => setShowProjChat((current) => !current)}
                 style={{
                   padding: "5px 12px",
@@ -597,7 +625,14 @@ export default function App() {
       {showC && PROJECT && <FicheClientModal st={st} onClose={() => setShowC(false)} PROJECT={PROJECT} />}
       {showProjSelector && <ProjSelectorModal onClose={() => setShowProjSelector(false)} projListLoading={projListLoading} projectsList={projectsList} onLoadProject={handleLoadProject} onRefresh={handleRefreshList} />}
       {showNewProj && <NewProjectModal onClose={() => setShowNewProj(false)} onCreated={handleProjectCreated} />}
-      {showProjChat && PROJECT && <ProjectChatPanel PROJECT={PROJECT} onClose={() => setShowProjChat(false)} />}
+      {showProjChat && PROJECT && (
+        <ProjectChatPanel
+          PROJECT={PROJECT}
+          assistantState={st.assistant?.project_chat}
+          onAssistantStateChange={persistProjectAssistantState}
+          onClose={() => setShowProjChat(false)}
+        />
+      )}
       {showHowTo && <HowToStartModal onClose={() => setShowHowTo(false)} />}
       {showDoc && <DocumentationModal onClose={() => setShowDoc(false)} />}
       <Toast msg={toast} />

@@ -9,8 +9,8 @@ export default function LotCard({lot,st,setST,clientMode}) {
   const impMode=st.IMPREVU_MODE[lot.id]??"pct", impVal=st.IMPREVU_VAL[lot.id]??lot.imprevuPct??10;
   const upd=fn=>setST(prev=>{const n={...prev};fn(n);return n;});
   return (
-    <div style={{marginBottom:"1rem",border:"1px solid var(--bd)",borderRadius:10,overflow:"hidden",background:"var(--sf)"}}>
-      <div onClick={()=>upd(n=>{n.lotOpen={...n.lotOpen,[lot.id]:!isOpen};})} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"11px 16px",cursor:"pointer",userSelect:"none",background:"var(--sf2)"}} onMouseEnter={e=>e.currentTarget.style.filter="brightness(.97)"} onMouseLeave={e=>e.currentTarget.style.filter=""}>
+    <div data-testid={`lot-card-${lot.id}`} style={{marginBottom:"1rem",border:"1px solid var(--bd)",borderRadius:10,overflow:"hidden",background:"var(--sf)"}}>
+      <div data-testid={`lot-toggle-${lot.id}`} onClick={()=>upd(n=>{n.lotOpen={...n.lotOpen,[lot.id]:!isOpen};})} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"11px 16px",cursor:"pointer",userSelect:"none",background:"var(--sf2)"}} onMouseEnter={e=>e.currentTarget.style.filter="brightness(.97)"} onMouseLeave={e=>e.currentTarget.style.filter=""}>
         <div>
           <div style={{fontSize:14,fontWeight:600,color:"var(--tx)"}}>{lot.title}</div>
           <div style={{fontSize:11,color:"var(--tx3)",marginTop:2}}>{lot.meta}</div>

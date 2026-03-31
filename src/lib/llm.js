@@ -1,5 +1,36 @@
 import { sb } from "../supabase.js";
 
+function estimateChars(value) {
+  if (!value) return 0;
+  if (typeof value === "string") return value.length;
+  try {
+    return JSON.stringify(value).length;
+  } catch (_) {
+    return 0;
+  }
+}
+
+function countTurns(messages) {
+  return (messages || []).filter((message) => message?.role === "user").length;
+}
+
+function logLLMDebug(stage, payload) {
+  if (!import.meta.env.DEV) return;
+
+  const stamp = new Date().toISOString();
+  const entry = {stamp, stage, ...payload};
+
+  window.__ONA_AI_DEBUG__ = window.__ONA_AI_DEBUG__ || [];
+  window.__ONA_AI_DEBUG__.push(entry);
+
+  const label = `[ONA_AI] ${payload.phase || "unknown"} · ${stage}`;
+  console.groupCollapsed(label);
+  Object.entries(entry).forEach(([key, value]) => {
+    console.log(`${key}:`, value);
+  });
+  console.groupEnd();
+}
+
 export const LLM_CONFIG = {
   claude: {
     url: "https://api.anthropic.com/v1/messages",
@@ -44,23 +75,61 @@ export const LLM_CONFIG = {
   },
 };
 
-export async function callLLM(messages, system, provider, apiKey) {
+export async function callLLM(messages, system, provider, apiKey, meta = {}) {
   const config = LLM_CONFIG[provider];
   if (!config) throw new Error(`Provider inconnu: ${provider}`);
   if (!apiKey?.trim()) throw new Error("Clé API manquante.");
 
+  const requestPayload = config.buildBody(messages, system);
+  const promptChars = estimateChars(system) + estimateChars(messages);
+  const payloadChars = estimateChars(requestPayload);
+  const turns = countTurns(messages);
+
+  logLLMDebug("request", {
+    provider,
+    phase: meta.phase || "unknown",
+    feature: meta.feature || "unknown",
+    turn: meta.turn || turns,
+    messageCount: messages.length,
+    systemChars: estimateChars(system),
+    promptChars,
+    payloadChars,
+  });
+
   const res = await fetch(config.url, {
     method: "POST",
     headers: config.headers(apiKey),
-    body: JSON.stringify(config.buildBody(messages, system)),
+    body: JSON.stringify(requestPayload),
   });
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
+    logLLMDebug("error", {
+      provider,
+      phase: meta.phase || "unknown",
+      feature: meta.feature || "unknown",
+      turn: meta.turn || turns,
+      messageCount: messages.length,
+      promptChars,
+      status: res.status,
+      error: err.error?.message || err.message || `HTTP ${res.status}`,
+    });
     throw new Error(err.error?.message || err.message || `HTTP ${res.status}`);
   }
 
-  return config.parse(await res.json());
+  const parsed = config.parse(await res.json());
+
+  logLLMDebug("response", {
+    provider,
+    phase: meta.phase || "unknown",
+    feature: meta.feature || "unknown",
+    turn: meta.turn || turns,
+    messageCount: messages.length,
+    promptChars,
+    responseChars: estimateChars(parsed),
+  });
+
+  return parsed;
 }
 
 export async function buildONASystemPrompt() {

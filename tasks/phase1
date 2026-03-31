@@ -1,0 +1,132 @@
+# ASSISTANT_REFACTOR_PLAN.md
+
+Version: v1
+Date: 2026-03-30
+Projet: BuildLogic
+Objectif: réduire fortement le coût tokens de l’assistant IA avant génération du devis, sans casser le flow actuel.
+
+---
+
+## 1. Contexte
+
+BuildLogic dispose déjà d’un assistant IA intégré avant la génération du devis.
+Le système fonctionne, mais le coût explose surtout à cause de :
+- la retransmission de trop de contexte à chaque appel
+- l’accumulation de l’historique conversationnel
+- un prompt trop large utilisé pour plusieurs rôles
+- la génération finale en SQL, coûteuse en tokens et fragile
+- l’absence d’un état métier structuré indépendant du chat
+
+Le problème principal n’est donc pas uniquement le modèle.
+Le problème principal est l’architecture du flux assistant.
+
+---
+
+## 2. Objectif produit
+
+Passer de :
+
+- chat cumulatif
+- prompts larges
+- historique complet retransmis
+- sortie SQL générée par le LLM
+
+à :
+
+- assistant piloté par état structuré
+- prompts séparés par phase
+- contexte compressé
+- sortie JSON canonique BuildLogic
+- conversion JSON -> Supabase côté application
+
+---
+
+## 3. Principes non négociables
+
+1. L’assistant structure, BuildLogic calcule.
+2. Le LLM ne doit plus être responsable du SQL final.
+3. L’historique libre ne doit plus être la source principale de vérité.
+4. Le state métier doit devenir la source principale.
+5. Chaque phase doit être testable indépendamment.
+6. Une phase = un commit propre.
+7. Garder le flow actuel fonctionnel tant que le nouveau n’est pas validé.
+
+---
+
+## 4. Résultat cible
+
+Le flow cible doit être :
+
+1. Import du rapport
+2. Analyse initiale IA
+3. Création / mise à jour d’un assistant_state structuré
+4. Clarifications ciblées
+5. Validation de complétude
+6. Génération d’un JSON canonique BuildLogic
+7. Conversion JSON -> bl_* via code applicatif
+8. Ouverture du devis dans le builder
+
+---
+
+## 5. Découpage en phases
+
+---
+
+### PHASE 1 — Instrumentation et cartographie du flow actuel
+
+#### Objectif
+Comprendre précisément où les tokens partent avant de refactorer.
+
+#### À faire
+- identifier tous les points d’entrée LLM
+- identifier les prompts actuels
+- identifier où l’historique complet est reconstruit
+- identifier où le SQL final est produit
+- identifier où le rapport brut est injecté
+- identifier où l’état courant est stocké
+- ajouter des logs simples en mode dev :
+  - provider
+  - nombre de messages envoyés
+  - taille approximative du prompt
+  - taille de la réponse
+  - phase courante
+  - nombre de tours
+
+#### Livrables
+- cartographie du flow IA actuel
+- logs de debug visibles en dev
+- base de comparaison avant/après
+
+#### Critères de validation
+- on peut dire pour un cas simple/moyen/complexe :
+  - combien d’appels sont faits
+  - où le contexte explose
+  - quelle étape coûte le plus
+
+#### Commit conseillé
+`chore: instrument assistant flow and log token hotspots`
+
+---
+
+### PHASE 2 — Introduction d’un assistant_state structuré
+
+#### Objectif
+Créer une source de vérité métier indépendante du simple chat.
+
+#### Structure cible minimale
+```json
+{
+  "step": "analysis",
+  "project_type": null,
+  "summary": "",
+  "known_facts": {},
+  "missing_fields": [],
+  "assumptions": [],
+  "suspens": [],
+  "lots_draft": [],
+  "metiers_draft": [],
+  "last_question": null,
+  "last_user_answer": null,
+  "ready_to_generate": false,
+  "confidence": "low"
+}

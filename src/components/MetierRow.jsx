@@ -10,8 +10,8 @@ export default function MetierRow({lk,m,st,setST,clientMode}) {
   const open=st.metierOpen[`${lk}${m.id}`]??true;
   const upd=fn=>setST(prev=>{const n={...prev};fn(n);return n;});
   return (
-    <div style={{borderTop:"1px solid var(--bd)"}}>
-      <div onClick={()=>upd(n=>{n.metierOpen={...n.metierOpen,[`${lk}${m.id}`]:!open};})} style={{display:"flex",alignItems:"center",padding:"8px 16px",cursor:"pointer",gap:8,userSelect:"none"}} onMouseEnter={e=>e.currentTarget.style.background="var(--sf2)"} onMouseLeave={e=>e.currentTarget.style.background=""}>
+    <div data-testid={`metier-row-${lk}-${m.id}`} style={{borderTop:"1px solid var(--bd)"}}>
+      <div data-testid={`metier-toggle-${lk}-${m.id}`} onClick={()=>upd(n=>{n.metierOpen={...n.metierOpen,[`${lk}${m.id}`]:!open};})} style={{display:"flex",alignItems:"center",padding:"8px 16px",cursor:"pointer",gap:8,userSelect:"none"}} onMouseEnter={e=>e.currentTarget.style.background="var(--sf2)"} onMouseLeave={e=>e.currentTarget.style.background=""}>
         <span style={{fontSize:9,color:"var(--tx3)",display:"inline-block",transform:open?"rotate(90deg)":"none",transition:"transform .18s"}}>▶</span>
         <span style={{fontSize:14}}>{m.icon}</span>
         <span style={{fontSize:13,fontWeight:600,color:"var(--tx)",flexShrink:0}}>{m.name}</span>

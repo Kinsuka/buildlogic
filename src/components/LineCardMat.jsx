@@ -22,8 +22,8 @@ export default function LineCardMat({lk,mid,x,st,setST,allMO,allMAT,clientMode})
     } else { setST(prev=>({...prev,LINE_OPEN:{...prev.LINE_OPEN,[lkey]:!open}})); }
   };
   return (
-    <div style={{border:"1px solid var(--bd)",borderRadius:8,marginTop:8,overflow:"hidden"}}>
-      <div onClick={toggle} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 12px",background:"var(--sf)",cursor:clientMode?"default":"pointer",userSelect:"none"}}
+    <div data-testid={`mat-line-${nk}`} style={{border:"1px solid var(--bd)",borderRadius:8,marginTop:8,overflow:"hidden"}}>
+      <div data-testid={`mat-line-toggle-${nk}`} onClick={toggle} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 12px",background:"var(--sf)",cursor:clientMode?"default":"pointer",userSelect:"none"}}
         onMouseEnter={e=>{if(!clientMode)e.currentTarget.style.filter="brightness(.97)";}}
         onMouseLeave={e=>e.currentTarget.style.filter=""}>
         <div style={{display:"flex",alignItems:"center",flex:1,minWidth:0}}>
@@ -39,26 +39,26 @@ export default function LineCardMat({lk,mid,x,st,setST,allMO,allMAT,clientMode})
         <div style={{display:"flex",alignItems:"flex-end",gap:8,padding:"7px 12px 9px",background:"var(--sf3)",borderTop:"1px solid var(--bd)",flexWrap:"wrap"}}>
           <div style={{display:"flex",flexDirection:"column",gap:3}}>
             <label style={{fontSize:10,fontWeight:500,color:"var(--tx3)",textTransform:"uppercase",letterSpacing:".03em"}}>Type</label>
-            <select value={pi} onChange={e=>upd(n=>{n.MAT_PROP={...n.MAT_PROP,[nk]:parseInt(e.target.value)};})} style={{width:172,fontSize:12,height:26,padding:"0 6px",border:"1px solid var(--bd3)",borderRadius:5,background:"var(--sf)",color:"var(--tx)"}}>
+            <select data-testid={`mat-type-${nk}`} value={pi} onChange={e=>upd(n=>{n.MAT_PROP={...n.MAT_PROP,[nk]:parseInt(e.target.value)};})} style={{width:172,fontSize:12,height:26,padding:"0 6px",border:"1px solid var(--bd3)",borderRadius:5,background:"var(--sf)",color:"var(--tx)"}}>
               {x.props.map((p,i)=><option key={i} value={i}>{p.name}</option>)}
             </select>
           </div>
           <div style={{display:"flex",flexDirection:"column",gap:3}}>
             <label style={{fontSize:10,fontWeight:500,color:"var(--tx3)",textTransform:"uppercase",letterSpacing:".03em"}}>Gamme</label>
-            <select value={g} onChange={e=>upd(n=>{n.MAT_GAMME={...n.MAT_GAMME,[nk]:e.target.value};})} style={{width:104,fontSize:12,height:26,padding:"0 6px",border:`1px solid ${gB[g]}`,borderRadius:5,background:"var(--sf)",color:gC[g]}}>
+            <select data-testid={`mat-gamme-${nk}`} value={g} onChange={e=>upd(n=>{n.MAT_GAMME={...n.MAT_GAMME,[nk]:e.target.value};})} style={{width:104,fontSize:12,height:26,padding:"0 6px",border:`1px solid ${gB[g]}`,borderRadius:5,background:"var(--sf)",color:gC[g]}}>
               <option value="std">Standard</option><option value="mid">Mid</option><option value="sup">Supérieur</option>
             </select>
           </div>
           {x.u?<>
             <div style={{width:1,height:22,background:"var(--bd)",alignSelf:"flex-end",flexShrink:0}}/>
-            <div style={{display:"flex",flexDirection:"column",gap:3}}><label style={{fontSize:10,fontWeight:500,color:"var(--tx3)",textTransform:"uppercase",letterSpacing:".03em"}}>Prix/m²</label><input type="number" step={1} value={Number(st.MAT_PRIX[k]??td.sug)} onChange={e=>upd(n=>{n.MAT_PRIX={...n.MAT_PRIX,[k]:parseFloat(e.target.value)||0};})} style={{width:62,fontSize:12,height:26,textAlign:"right",border:"1px solid var(--bd3)",borderRadius:5,background:"var(--sf)",color:"var(--tx)",padding:"0 6px"}}/></div>
+            <div style={{display:"flex",flexDirection:"column",gap:3}}><label style={{fontSize:10,fontWeight:500,color:"var(--tx3)",textTransform:"uppercase",letterSpacing:".03em"}}>Prix/m²</label><input data-testid={`mat-prix-${nk}`} type="number" step={1} value={Number(st.MAT_PRIX[k]??td.sug)} onChange={e=>upd(n=>{n.MAT_PRIX={...n.MAT_PRIX,[k]:parseFloat(e.target.value)||0};})} style={{width:62,fontSize:12,height:26,textAlign:"right",border:"1px solid var(--bd3)",borderRadius:5,background:"var(--sf)",color:"var(--tx)",padding:"0 6px"}}/></div>
             <span style={{fontSize:11,color:"var(--tx3)",alignSelf:"flex-end",paddingBottom:3}}>€/m²</span>
             <div style={{width:1,height:22,background:"var(--bd)",alignSelf:"flex-end",flexShrink:0}}/>
-            <div style={{display:"flex",flexDirection:"column",gap:3}}><label style={{fontSize:10,fontWeight:500,color:"var(--tx3)",textTransform:"uppercase",letterSpacing:".03em"}}>Dim.</label><input type="text" value={dim} onChange={e=>{const v=e.target.value;upd(n=>{n.MAT_DIM={...n.MAT_DIM,[nk]:v};const m=v.replace(",",".").match(/([\d.]+)\s*[x×X]\s*([\d.]+)/);if(m){n.MAT_DIM_M2={...n.MAT_DIM_M2,[nk]:parseFloat(m[1])*parseFloat(m[2])};const q={...n.MAT_QTY};delete q[nk];n.MAT_QTY=q;}});}} style={{width:68,fontSize:12,height:26,border:"1px solid var(--bd3)",borderRadius:5,background:"var(--sf)",color:"var(--tx)",padding:"0 6px",textAlign:"right"}}/></div>
-            <div style={{display:"flex",flexDirection:"column",gap:3}}><label style={{fontSize:10,fontWeight:500,color:"var(--tx3)",textTransform:"uppercase",letterSpacing:".03em"}}>Qté m²</label><input type="number" step={1} value={qty} onChange={e=>upd(n=>{n.MAT_QTY={...n.MAT_QTY,[nk]:parseInt(e.target.value)||0};})} style={{width:50,fontSize:12,height:26,textAlign:"right",border:"1px solid var(--bd3)",borderRadius:5,background:"var(--sf)",color:"var(--tx)",padding:"0 6px"}}/></div>
+            <div style={{display:"flex",flexDirection:"column",gap:3}}><label style={{fontSize:10,fontWeight:500,color:"var(--tx3)",textTransform:"uppercase",letterSpacing:".03em"}}>Dim.</label><input data-testid={`mat-dim-${nk}`} type="text" value={dim} onChange={e=>{const v=e.target.value;upd(n=>{n.MAT_DIM={...n.MAT_DIM,[nk]:v};const m=v.replace(",",".").match(/([\d.]+)\s*[x×X]\s*([\d.]+)/);if(m){n.MAT_DIM_M2={...n.MAT_DIM_M2,[nk]:parseFloat(m[1])*parseFloat(m[2])};const q={...n.MAT_QTY};delete q[nk];n.MAT_QTY=q;}});}} style={{width:68,fontSize:12,height:26,border:"1px solid var(--bd3)",borderRadius:5,background:"var(--sf)",color:"var(--tx)",padding:"0 6px",textAlign:"right"}}/></div>
+            <div style={{display:"flex",flexDirection:"column",gap:3}}><label style={{fontSize:10,fontWeight:500,color:"var(--tx3)",textTransform:"uppercase",letterSpacing:".03em"}}>Qté m²</label><input data-testid={`mat-qty-${nk}`} type="number" step={1} value={qty} onChange={e=>upd(n=>{n.MAT_QTY={...n.MAT_QTY,[nk]:parseInt(e.target.value)||0};})} style={{width:50,fontSize:12,height:26,textAlign:"right",border:"1px solid var(--bd3)",borderRadius:5,background:"var(--sf)",color:"var(--tx)",padding:"0 6px"}}/></div>
           </>:<>
             <div style={{width:1,height:22,background:"var(--bd)",alignSelf:"flex-end",flexShrink:0}}/>
-            <div style={{display:"flex",flexDirection:"column",gap:3}}><label style={{fontSize:10,fontWeight:500,color:"var(--tx3)",textTransform:"uppercase",letterSpacing:".03em"}}>Montant</label><input type="number" step={10} value={Number(st.MAT_PRIX[k]??td.sug)} onChange={e=>upd(n=>{n.MAT_PRIX={...n.MAT_PRIX,[k]:parseFloat(e.target.value)||0};})} style={{width:80,fontSize:12,height:26,textAlign:"right",border:"1px solid var(--bd3)",borderRadius:5,background:"var(--sf)",color:"var(--tx)",padding:"0 6px"}}/></div>
+            <div style={{display:"flex",flexDirection:"column",gap:3}}><label style={{fontSize:10,fontWeight:500,color:"var(--tx3)",textTransform:"uppercase",letterSpacing:".03em"}}>Montant</label><input data-testid={`mat-montant-${nk}`} type="number" step={10} value={Number(st.MAT_PRIX[k]??td.sug)} onChange={e=>upd(n=>{n.MAT_PRIX={...n.MAT_PRIX,[k]:parseFloat(e.target.value)||0};})} style={{width:80,fontSize:12,height:26,textAlign:"right",border:"1px solid var(--bd3)",borderRadius:5,background:"var(--sf)",color:"var(--tx)",padding:"0 6px"}}/></div>
             <span style={{fontSize:11,color:"var(--tx3)",alignSelf:"flex-end",paddingBottom:3}}>€</span>
           </>}
           <span style={{fontSize:10,color:"var(--tx3)",background:"var(--sf)",border:"1px solid var(--bd)",borderRadius:8,padding:"3px 8px",whiteSpace:"nowrap",alignSelf:"flex-end",marginLeft:"auto"}}>Réf. {td.lo}–{td.hi} {x.u?"€/m²":"€"}</span>
