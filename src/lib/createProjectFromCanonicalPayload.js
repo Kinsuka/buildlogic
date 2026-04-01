@@ -115,6 +115,7 @@ export function buildCanonicalInsertPlan(rawPayload, options = {}) {
           d_base: line.d_base,
           props: line.props,
           ordre: line.ordre,
+          mat_source: line.mat_source || "catalog",
         });
       });
     });
@@ -184,6 +185,7 @@ export function buildProjectSnapshotFromInsertPlan(plan) {
               u: line.avec_unite,
               qBase: line.q_base,
               dBase: line.d_base,
+              matSource: line.mat_source || "catalog",
               props: Array.isArray(line.props) ? line.props : [],
             })),
         }));

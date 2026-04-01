@@ -3,6 +3,7 @@ export const CANONICAL_PAYLOAD_VERSION = "v1";
 export const PROJECT_STATUS_VALUES = ["draft"];
 export const TVA_VALUES = [6, 21];
 export const SUSPENS_LEVEL_VALUES = ["rouge", "orange", "vert"];
+export const MAT_SOURCE_VALUES = ["catalog", "provisional", "override"];
 
 function asObject(value, fallback = {}) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : fallback;
@@ -85,6 +86,8 @@ function normalizeMatLines(lines, path) {
     const item = asObject(line);
     ensure(asString(item.line_key), `${path}[${index}].line_key is required`);
     ensure(asString(item.label), `${path}[${index}].label is required`);
+    const matSource = asString(item.mat_source, "catalog");
+    ensure(MAT_SOURCE_VALUES.includes(matSource), `${path}[${index}].mat_source is invalid`);
 
     return {
       line_key: asString(item.line_key),
@@ -94,6 +97,7 @@ function normalizeMatLines(lines, path) {
       d_base: item.d_base == null ? null : asString(item.d_base),
       props: normalizeMatProps(item.props, `${path}[${index}].props`),
       ordre: asNumber(item.ordre, index + 1),
+      mat_source: matSource,
     };
   });
 }

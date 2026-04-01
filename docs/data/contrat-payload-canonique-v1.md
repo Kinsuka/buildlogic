@@ -1,7 +1,7 @@
 # Contrat de donnees BuildLogic - Payload canonique v1
 
 Version du document : `v1`
-Date : `2026-03-31`
+Date : `2026-04-01`
 Auteur : `Codex`
 Perimetre : contrat intermediaire assistant -> payload canonique -> mapper applicatif -> Supabase.
 
@@ -112,6 +112,17 @@ Le code applicatif prend ensuite le relais pour :
 - `label`
 - `avec_unite`
 
+### mat_source (string, optionnel dans le payload entrant, obligatoire en base)
+
+Valeurs autorisees : `catalog` | `provisional` | `override`
+
+- `catalog` : ligne issue du referentiel materiaux valide (defaut si absent)
+- `provisional` : ligne construite par le LLM wizard, non presente dans `materiaux`
+- `override` : ligne basee sur `catalog` mais adaptee localement au projet
+
+Le validateur normalise a `catalog` si le champ est absent.
+Le mapper ecrit toujours `mat_source` dans `bl_mat_lines`.
+
 ---
 
 ## 4. Champs optionnels
@@ -131,6 +142,7 @@ Le code applicatif prend ensuite le relais pour :
 - `mat_line.q_base`
 - `mat_line.d_base`
 - `mat_line.props`
+- `mat_line.mat_source`
 
 ---
 

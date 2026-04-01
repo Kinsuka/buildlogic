@@ -186,6 +186,9 @@ describe("assistantReferenceContext", () => {
     expect(block).toContain("Pose carrelage sol 60×60");
     expect(block).toContain("Prise / interrupteur");
     expect(block).toContain("Membrane étanchéité zones humides");
+    expect(block).toContain("mat_source (obligatoire dans chaque mat_line)");
+    expect(block).toContain("provisional = materiau absent du referentiel");
+    expect(block).toContain("mat_source=catalog");
   });
 
   it("injects the compact metier reference into the wizard system prompt", () => {
@@ -204,5 +207,7 @@ describe("assistantReferenceContext", () => {
     expect(prompt).toContain("categories materiaux: Plomberie, Consommables, Finitions");
     expect(prompt).toContain("POSTES SYSTEMATIQUES A VERIFIER");
     expect(prompt).toContain("Membrane étanchéité zones humides");
+    expect(prompt).toContain("mat_source (obligatoire dans chaque mat_line)");
+    expect(prompt).toContain("override = materiau catalogue adapte localement au projet");
   });
 });

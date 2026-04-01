@@ -346,6 +346,13 @@ export function buildAssistantReferenceContext(
       mo_lines: "une ligne par prestation concrete retenue; convertir la quantite chantier en jours a partir des rendements de reference",
       mat_lines: "une ligne par fourniture significative; avec_unite=true si quantite variable, q_base numerique, d_base explicite",
       props: "chaque mat_line doit contenir au moins une option props avec std/mid/sup; si une seule option est connue, reutiliser la meme base de prix comme point de depart",
+      mat_source: [
+        "chaque mat_line doit inclure mat_source avec une de ces valeurs: catalog | provisional | override",
+        'catalog = materiau present dans le referentiel injecte',
+        "provisional = materiau absent du referentiel; ne jamais bloquer le devis, creer une ligne plausible avec props realistes marche belge",
+        "override = materiau catalogue adapte localement au projet; reutiliser la base connue puis ajuster",
+        "regle fondamentale: le devis doit rester complet meme si un materiau manque du catalogue",
+      ],
     },
     postes_systematiques: postesSystematiques.map((item) => ({
       label: item.label,
@@ -369,6 +376,8 @@ export function formatAssistantReferenceContext(context) {
     `- mo_lines: ${context.conventions.mo_lines}`,
     `- mat_lines: ${context.conventions.mat_lines}`,
     `- props: ${context.conventions.props}`,
+    "- mat_source (obligatoire dans chaque mat_line):",
+    ...context.conventions.mat_source.map((rule) => `  - ${rule}`),
     "",
     "POSTES SYSTEMATIQUES A VERIFIER",
   ];
@@ -409,7 +418,7 @@ export function formatAssistantReferenceContext(context) {
       lines.push("  mat_line_templates:");
       metier.mat_line_templates.forEach((template) => {
         lines.push(
-          `  - ${template.line_key} :: ${template.label} :: avec_unite=${template.avec_unite} :: q_base ${template.q_base} :: d_base ${template.d_base} :: prix ${template.props_seed.price_ref.lo}/${template.props_seed.price_ref.sug}/${template.props_seed.price_ref.hi}`
+          `  - ${template.line_key} :: ${template.label} :: avec_unite=${template.avec_unite} :: q_base ${template.q_base} :: d_base ${template.d_base} :: mat_source=catalog :: prix ${template.props_seed.price_ref.lo}/${template.props_seed.price_ref.sug}/${template.props_seed.price_ref.hi}`
         );
       });
     }

@@ -111,6 +111,7 @@ describe("canonical project payload mapper", () => {
     expect(project?.lots[0].title).toBe("Salle de bain");
     expect(project?.lots[0].metiers[0].mo[0].jRef.sug).toBe(2);
     expect(project?.lots[0].metiers[0].mat[0].props[0].name).toBe("Pack WC suspendu");
+    expect(project?.lots[0].metiers[0].mat[0].matSource).toBe("catalog");
   });
 
   it("handles larger fixtures with consistent counts", () => {
@@ -123,6 +124,32 @@ describe("canonical project payload mapper", () => {
     expect(plan.inserts.bl_suspens).toHaveLength(3);
     expect(plan.inserts.bl_metiers.length).toBeGreaterThan(plan.inserts.bl_lots.length);
     expect(plan.inserts.bl_mo_lines.length).toBeGreaterThan(0);
+  });
+
+  it("keeps mat_source provisional through normalization and insert planning", () => {
+    const payload = structuredClone(SIMPLE_CANONICAL_PROJECT);
+    payload.lots[0].metiers[0].mat_lines[0].mat_source = "provisional";
+
+    const plan = buildCanonicalInsertPlan(payload, {
+      idFactory: createIdFactory(),
+      storeKeyFactory: () => "ona_bl_provisional2026",
+    });
+
+    expect(plan.payload.lots[0].metiers[0].mat_lines[0].mat_source).toBe("provisional");
+    expect(plan.inserts.bl_mat_lines[0].mat_source).toBe("provisional");
+  });
+
+  it("normalizes missing mat_source to catalog in insert planning", () => {
+    const payload = structuredClone(SIMPLE_CANONICAL_PROJECT);
+    delete payload.lots[0].metiers[0].mat_lines[0].mat_source;
+
+    const plan = buildCanonicalInsertPlan(payload, {
+      idFactory: createIdFactory(),
+      storeKeyFactory: () => "ona_bl_catalog2026",
+    });
+
+    expect(plan.payload.lots[0].metiers[0].mat_lines[0].mat_source).toBe("catalog");
+    expect(plan.inserts.bl_mat_lines[0].mat_source).toBe("catalog");
   });
 
   it("surfaces Supabase insertion errors with table context", async () => {
