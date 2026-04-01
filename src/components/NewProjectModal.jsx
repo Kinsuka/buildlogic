@@ -5,8 +5,21 @@ import {
   mergeAssistantState,
   normalizeAssistantState,
 } from "../lib/assistantState.js";
+import {
+  buildWizardAnswerPayload,
+  buildWizardConversation,
+  createDecisionStep,
+} from "../lib/assistantDecisionWizard.js";
+import {
+  buildAssistantFinalizationMeta,
+  logAssistantFinalizationEvent,
+  WIZARD_CREATION_STATUS,
+} from "../lib/assistantFinalization.js";
+import { validateCanonicalProjectPayload } from "../lib/canonicalProjectContract.js";
+import { createProjectFromCanonicalPayload } from "../lib/createProjectFromCanonicalPayload.js";
 import { createProject } from "../lib/projects.js";
-import { buildONASystemPrompt, callLLM, extractSQL } from "../lib/llm.js";
+import { buildONASystemPrompt, callLLM, extractCanonicalPayload, extractSQL } from "../lib/llm.js";
+import { sb } from "../supabase.js";
 import { Modal } from "./Modal.jsx";
 
 const PROVIDER_LABELS = {
@@ -23,24 +36,10 @@ const PROVIDER_LINKS = {
 
 const WIZARD_ASSISTANT_STORAGE_KEY = `ona_${ASSISTANT_STATE_KEYS.newProjectWizard}`;
 
-function extractChoiceOptions(text) {
-  if (!text) return [];
-
-  const lines = text
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .filter((line) => !line.startsWith("```"));
-
-  const options = lines
-    .filter((line) => /^([-*•]|\d+[.)]|[A-Z][.)]|\[[ xX]\])\s+/.test(line))
-    .map((line) => line.replace(/^([-*•]|\d+[.)]|[A-Z][.)]|\[[ xX]\])\s+/, "").trim())
-    .filter((line) => line && line.length <= 90)
-    .filter((line) => !/^autre\b/i.test(line))
-    .filter((line) => !/[?]$/.test(line));
-
-  return Array.from(new Set(options)).slice(0, 6);
-}
+const FINAL_OUTPUT_KIND = {
+  canonicalPayload: "canonical_payload",
+  sql: "sql",
+};
 
 function shapeCreatedProject(raw) {
   if (!raw) return null;
@@ -80,10 +79,13 @@ async function executeProjectSQL(sql) {
   const data = await res.json().catch(() => ({}));
 
   if (!res.ok || !data.success) {
-    throw new Error(data.error || `Erreur creation (${res.status})`);
+    const error = new Error(data.error || `Erreur creation (${res.status})`);
+    error.edgeStatus = res.status;
+    error.edgeError = data.error || `Erreur creation (${res.status})`;
+    throw error;
   }
 
-  return data;
+  return { data, status: res.status };
 }
 
 export default function NewProjectModal({onClose, onCreated}) {
@@ -96,9 +98,12 @@ export default function NewProjectModal({onClose, onCreated}) {
   });
   const [remember, setRemember] = useState(true);
   const [rapport, setRapport] = useState("");
-  const [messages, setMessages] = useState([]);
+  const [reportMessage, setReportMessage] = useState(null);
+  const [decisionSteps, setDecisionSteps] = useState([]);
+  const [currentDecisionIndex, setCurrentDecisionIndex] = useState(0);
   const [input, setInput] = useState("");
   const [selectedChoices, setSelectedChoices] = useState([]);
+  const [dontKnow, setDontKnow] = useState(false);
   const [assistantState, setAssistantState] = useState(() => {
     try {
       const raw = localStorage.getItem(WIZARD_ASSISTANT_STORAGE_KEY);
@@ -109,6 +114,7 @@ export default function NewProjectModal({onClose, onCreated}) {
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [payloadPreview, setPayloadPreview] = useState(null);
   const [sqlPreview, setSqlPreview] = useState("");
   const [creating, setCreating] = useState(false);
 
@@ -139,6 +145,8 @@ export default function NewProjectModal({onClose, onCreated}) {
     display: "block",
   };
 
+  const hasFinalPreview = Boolean(payloadPreview || sqlPreview.trim());
+
   const header = useMemo(() => {
     if (mode === "manual") {
       return {
@@ -157,22 +165,19 @@ export default function NewProjectModal({onClose, onCreated}) {
       title: "✚ Nouveau projet - Questions",
       sub: creating
         ? "Creation du projet en cours..."
-        : sqlPreview
+        : hasFinalPreview
           ? "Le projet est pret a etre cree"
           : "L'assistant collecte les infos manquantes",
     };
-  }, [mode, step, sqlPreview, creating]);
+  }, [mode, step, hasFinalPreview, creating]);
 
-  const currentAssistantMessage = useMemo(() => {
-    for (let i = messages.length - 1; i >= 0; i -= 1) {
-      if (messages[i]?.role === "assistant") return messages[i];
-    }
-    return null;
-  }, [messages]);
-
-  const quickChoices = useMemo(
-    () => extractChoiceOptions(currentAssistantMessage?.content),
-    [currentAssistantMessage]
+  const currentDecision = decisionSteps[currentDecisionIndex] || null;
+  const currentAssistantMessage = currentDecision?.assistantMessage || null;
+  const currentQuestion = currentDecision?.question || null;
+  const quickChoices = currentQuestion?.options || [];
+  const visibleMessages = useMemo(
+    () => buildWizardConversation(reportMessage, decisionSteps, currentDecisionIndex),
+    [reportMessage, decisionSteps, currentDecisionIndex]
   );
 
   useEffect(() => {
@@ -186,10 +191,23 @@ export default function NewProjectModal({onClose, onCreated}) {
     setAssistantState((current) => mergeAssistantState(current, {phase: step}));
   }, [mode, step]);
 
+  useEffect(() => {
+    const answer = currentDecision?.answer;
+    setSelectedChoices(answer?.selectedChoices || []);
+    setInput(answer?.otherText || "");
+    setDontKnow(Boolean(answer?.dontKnow));
+  }, [currentDecisionIndex, currentDecision]);
+
   const toggleChoice = (choice) => {
-    setSelectedChoices((current) =>
-      current.includes(choice) ? current.filter((item) => item !== choice) : [...current, choice]
-    );
+    setDontKnow(false);
+    setSelectedChoices((current) => {
+      if (currentQuestion?.type === "multiple") {
+        return current.includes(choice)
+          ? current.filter((item) => item !== choice)
+          : [...current, choice];
+      }
+      return current.includes(choice) ? [] : [choice];
+    });
   };
 
   const persistApiConfig = () => {
@@ -202,15 +220,151 @@ export default function NewProjectModal({onClose, onCreated}) {
     setAssistantState((current) => mergeAssistantState(current, patch));
   };
 
+  const logFinalizationEvent = (event, meta = {}) => {
+    logAssistantFinalizationEvent(event, {
+      ...buildAssistantFinalizationMeta({
+        provider,
+        turn: assistantState.turn || 0,
+        ...meta,
+      }),
+    });
+  };
+
+  const applyAssistantReply = ({ reply, phase, turn, nextSteps }) => {
+    const rawPayload = extractCanonicalPayload(reply);
+    const sql = extractSQL(reply);
+    const meta = {
+      feature: "project_wizard",
+      phase,
+      turn,
+      provider,
+      reply,
+      outputFormat: rawPayload ? FINAL_OUTPUT_KIND.canonicalPayload : sql ? FINAL_OUTPUT_KIND.sql : "none",
+    };
+
+    if (rawPayload) {
+      let normalizedPayload;
+      try {
+        normalizedPayload = validateCanonicalProjectPayload(rawPayload);
+      } catch (e) {
+        setError(`Payload final invalide : ${e.message}`);
+        logAssistantFinalizationEvent("assistant_final_output_invalid", buildAssistantFinalizationMeta({
+          ...meta,
+          payload: rawPayload,
+          edgeError: e.message,
+        }));
+        return false;
+      }
+
+      logAssistantFinalizationEvent("assistant_final_output_detected", buildAssistantFinalizationMeta({
+        ...meta,
+        payload: normalizedPayload,
+      }));
+      setPayloadPreview(normalizedPayload);
+      setSqlPreview("");
+      setDecisionSteps([
+        ...nextSteps,
+        {
+          assistantMessage: { role: "assistant", content: reply },
+          question: null,
+          answer: null,
+        },
+      ]);
+      setCurrentDecisionIndex(nextSteps.length);
+      updateAssistantState({
+        phase: "review",
+        turn,
+        last_question: null,
+        final_output: {
+          kind: FINAL_OUTPUT_KIND.canonicalPayload,
+          content: normalizedPayload,
+        },
+        final_sql: "",
+        creation_status: WIZARD_CREATION_STATUS.ready_to_create,
+        ready_to_generate: true,
+      });
+      logAssistantFinalizationEvent("assistant_preview_ready", buildAssistantFinalizationMeta({
+        ...meta,
+        phase: "review",
+        payload: normalizedPayload,
+      }));
+      return true;
+    }
+
+    if (sql) {
+      logAssistantFinalizationEvent("assistant_final_output_detected", buildAssistantFinalizationMeta({
+        ...meta,
+        payload: null,
+        sql,
+      }));
+      logAssistantFinalizationEvent("assistant_final_sql_detected", buildAssistantFinalizationMeta({
+        ...meta,
+        sql,
+      }));
+      setPayloadPreview(null);
+      setSqlPreview(sql);
+      setDecisionSteps([
+        ...nextSteps,
+        {
+          assistantMessage: { role: "assistant", content: reply },
+          question: null,
+          answer: null,
+        },
+      ]);
+      setCurrentDecisionIndex(nextSteps.length);
+      updateAssistantState({
+        phase: "review",
+        turn,
+        last_question: null,
+        final_output: {
+          kind: FINAL_OUTPUT_KIND.sql,
+          content: sql,
+        },
+        final_sql: sql,
+        creation_status: WIZARD_CREATION_STATUS.ready_to_create,
+        ready_to_generate: true,
+      });
+      logAssistantFinalizationEvent("assistant_preview_ready", buildAssistantFinalizationMeta({
+        ...meta,
+        phase: "review",
+        sql,
+      }));
+      logAssistantFinalizationEvent("assistant_sql_preview_ready", buildAssistantFinalizationMeta({
+        ...meta,
+        phase: "review",
+        sql,
+      }));
+      return true;
+    }
+
+    logAssistantFinalizationEvent("assistant_final_output_missing", buildAssistantFinalizationMeta(meta));
+    setSqlPreview("");
+    setPayloadPreview(null);
+    setDecisionSteps([...nextSteps, createDecisionStep(reply)]);
+    setCurrentDecisionIndex(nextSteps.length);
+    updateAssistantState({
+      phase: "chat",
+      turn,
+      last_question: reply,
+      final_output: null,
+      final_sql: "",
+      creation_status: WIZARD_CREATION_STATUS.clarification,
+      ready_to_generate: false,
+    });
+    return false;
+  };
+
   const analyzeRapport = async () => {
     if (!rapport.trim()) return;
 
     setLoading(true);
     setError("");
+    setPayloadPreview(null);
+    setSqlPreview("");
 
     try {
       persistApiConfig();
-      const system = await buildONASystemPrompt();
+      const system = await buildONASystemPrompt({rapport});
       const firstMsg = {
         role: "user",
         content: `Voici le rapport de visite :\n\n${rapport}\n\nAnalyse-le et pose ta premiere question.`,
@@ -220,15 +374,25 @@ export default function NewProjectModal({onClose, onCreated}) {
         phase: "initial_analysis",
         turn: 1,
       });
-      setMessages([firstMsg, {role: "assistant", content: reply}]);
+      setReportMessage(firstMsg);
       setSelectedChoices([]);
       setInput("");
+      setDontKnow(false);
       updateAssistantState({
         phase: "chat",
         turn: 1,
         last_user_answer: rapport,
         last_question: reply,
+        final_output: null,
+        final_sql: "",
+        creation_status: WIZARD_CREATION_STATUS.clarification,
         ready_to_generate: false,
+      });
+      applyAssistantReply({
+        reply,
+        phase: "initial_analysis",
+        turn: 1,
+        nextSteps: [],
       });
       setStep("chat");
     } catch (e) {
@@ -241,36 +405,58 @@ export default function NewProjectModal({onClose, onCreated}) {
   const sendMessage = async (text) => {
     const content = typeof text === "string"
       ? text.trim()
-      : [...selectedChoices, input.trim()].filter(Boolean).join(" | ");
+      : buildWizardAnswerPayload({
+          question: currentQuestion,
+          selectedChoices: dontKnow ? [] : selectedChoices.map((item) => item.label || item),
+          otherText: input,
+          dontKnow,
+        });
     if (!content) return;
 
-    const userMsg = {role: "user", content};
-    const nextMessages = [...messages, userMsg];
-    setMessages(nextMessages);
+    const nextSteps = decisionSteps.slice(0, currentDecisionIndex + 1).map((step, index) =>
+      index === currentDecisionIndex
+        ? {
+            ...step,
+            answer: {
+              selectedChoices: dontKnow ? [] : selectedChoices.map((item) => item.label || item),
+              otherText: input.trim(),
+              dontKnow,
+              submittedContent: content,
+            },
+          }
+        : step
+    );
+
+    const nextMessages = buildWizardConversation(reportMessage, nextSteps, currentDecisionIndex).concat({
+      role: "user",
+      content,
+    });
     setInput("");
     setSelectedChoices([]);
+    setDontKnow(false);
     setLoading(true);
     setError("");
 
     try {
-      const system = await buildONASystemPrompt();
+      const system = await buildONASystemPrompt({rapport});
       const reply = await callLLM(nextMessages, system, provider, apiKey, {
         feature: "project_wizard",
         phase: "clarification",
         turn: nextMessages.filter((message) => message.role === "user").length,
       });
-      const nextWithReply = [...nextMessages, {role: "assistant", content: reply}];
-      setMessages(nextWithReply);
+      const updatedSteps = nextSteps;
       updateAssistantState({
         phase: "chat",
         turn: nextMessages.filter((message) => message.role === "user").length,
         last_user_answer: content,
-        last_question: reply,
-        ready_to_generate: false,
+        creation_status: WIZARD_CREATION_STATUS.clarification,
       });
-
-      const sql = extractSQL(reply);
-      if (sql) setSqlPreview(sql);
+      applyAssistantReply({
+        reply,
+        phase: "clarification",
+        turn: nextMessages.filter((message) => message.role === "user").length,
+        nextSteps: updatedSteps,
+      });
     } catch (e) {
       setError(e.message);
     }
@@ -279,45 +465,175 @@ export default function NewProjectModal({onClose, onCreated}) {
   };
 
   const createProjectAI = async () => {
-    if (!sqlPreview.trim()) return;
+    if (!hasFinalPreview) return;
 
     setCreating(true);
     setError("");
+    logAssistantFinalizationEvent("assistant_create_button_clicked", buildAssistantFinalizationMeta({
+      feature: "project_wizard",
+      phase: "ready_to_create",
+      turn: assistantState.turn || 0,
+      provider,
+      outputFormat: payloadPreview ? FINAL_OUTPUT_KIND.canonicalPayload : FINAL_OUTPUT_KIND.sql,
+      payload: payloadPreview,
+      sql: sqlPreview,
+    }));
+    updateAssistantState({
+      phase: "creating",
+      creation_status: WIZARD_CREATION_STATUS.creating,
+      final_output: payloadPreview
+        ? { kind: FINAL_OUTPUT_KIND.canonicalPayload, content: payloadPreview }
+        : sqlPreview
+          ? { kind: FINAL_OUTPUT_KIND.sql, content: sqlPreview }
+          : null,
+      final_sql: sqlPreview,
+      ready_to_generate: true,
+    });
 
     try {
-      let data;
-      try {
-        data = await executeProjectSQL(sqlPreview);
-      } catch (firstError) {
-        const system = await buildONASystemPrompt();
-        const repairPrompt = {
-          role: "user",
-          content: `Le SQL precedent a echoue a l'execution avec cette erreur PostgreSQL :
+      let project = null;
+
+      if (payloadPreview) {
+        logAssistantFinalizationEvent("assistant_canonical_create_started", buildAssistantFinalizationMeta({
+          feature: "project_wizard",
+          phase: "creating",
+          turn: assistantState.turn || 0,
+          provider,
+          outputFormat: FINAL_OUTPUT_KIND.canonicalPayload,
+          payload: payloadPreview,
+        }));
+        const result = await createProjectFromCanonicalPayload(payloadPreview, sb);
+        project = result.project;
+        logAssistantFinalizationEvent("assistant_canonical_create_succeeded", buildAssistantFinalizationMeta({
+          feature: "project_wizard",
+          phase: "created",
+          turn: assistantState.turn || 0,
+          provider,
+          outputFormat: FINAL_OUTPUT_KIND.canonicalPayload,
+          payload: payloadPreview,
+        }));
+      } else {
+        let data;
+        try {
+          logAssistantFinalizationEvent("assistant_edge_call_started", buildAssistantFinalizationMeta({
+            feature: "project_wizard",
+            phase: WIZARD_CREATION_STATUS.creating,
+            turn: assistantState.turn || 0,
+            provider,
+            outputFormat: FINAL_OUTPUT_KIND.sql,
+            sql: sqlPreview,
+          }));
+          data = await executeProjectSQL(sqlPreview);
+          logAssistantFinalizationEvent("assistant_edge_response_received", buildAssistantFinalizationMeta({
+            feature: "project_wizard",
+            phase: WIZARD_CREATION_STATUS.creating,
+            turn: assistantState.turn || 0,
+            provider,
+            outputFormat: FINAL_OUTPUT_KIND.sql,
+            sql: sqlPreview,
+            edgeStatus: data.status,
+          }));
+        } catch (firstError) {
+          logAssistantFinalizationEvent("assistant_edge_response_error", buildAssistantFinalizationMeta({
+            feature: "project_wizard",
+            phase: WIZARD_CREATION_STATUS.creating,
+            turn: assistantState.turn || 0,
+            provider,
+            outputFormat: FINAL_OUTPUT_KIND.sql,
+            sql: sqlPreview,
+            edgeStatus: firstError.edgeStatus || null,
+            edgeError: firstError.edgeError || firstError.message,
+          }));
+          const system = await buildONASystemPrompt({rapport});
+          const repairPrompt = {
+            role: "user",
+            content: `Le SQL precedent a echoue a l'execution avec cette erreur PostgreSQL :
 ${firstError.message}
 
 Corrige le SQL pour respecter STRICTEMENT le schema ONA.
 Renvoie uniquement un bloc \`\`\`sql ... \`\`\` complet et corrige.`,
-        };
-        const repairReply = await callLLM([...messages, repairPrompt], system, provider, apiKey, {
-          feature: "project_wizard",
-          phase: "sql_repair",
-          turn: messages.filter((message) => message.role === "user").length + 1,
-        });
-        const repairedSQL = extractSQL(repairReply);
-        if (!repairedSQL) throw firstError;
-        setSqlPreview(repairedSQL);
-        updateAssistantState({
-          phase: "sql_repair",
-          last_question: "SQL repair requested",
-          ready_to_generate: false,
-        });
-        data = await executeProjectSQL(repairedSQL);
+          };
+          const repairReply = await callLLM([...buildWizardConversation(reportMessage, decisionSteps), repairPrompt], system, provider, apiKey, {
+            feature: "project_wizard",
+            phase: "sql_repair",
+            turn: buildWizardConversation(reportMessage, decisionSteps).filter((message) => message.role === "user").length + 1,
+          });
+          const repairedSQL = extractSQL(repairReply);
+          if (!repairedSQL) throw firstError;
+          setSqlPreview(repairedSQL);
+          updateAssistantState({
+            phase: "review",
+            final_output: {
+              kind: FINAL_OUTPUT_KIND.sql,
+              content: repairedSQL,
+            },
+            final_sql: repairedSQL,
+            creation_status: WIZARD_CREATION_STATUS.ready_to_create,
+            ready_to_generate: true,
+          });
+          logAssistantFinalizationEvent("assistant_final_output_detected", buildAssistantFinalizationMeta({
+            feature: "project_wizard",
+            phase: "sql_repair",
+            turn: assistantState.turn || 0,
+            provider,
+            outputFormat: FINAL_OUTPUT_KIND.sql,
+            reply: repairReply,
+            sql: repairedSQL,
+          }));
+          logAssistantFinalizationEvent("assistant_final_sql_detected", buildAssistantFinalizationMeta({
+            feature: "project_wizard",
+            phase: "sql_repair",
+            turn: assistantState.turn || 0,
+            provider,
+            outputFormat: FINAL_OUTPUT_KIND.sql,
+            reply: repairReply,
+            sql: repairedSQL,
+          }));
+          logAssistantFinalizationEvent("assistant_preview_ready", buildAssistantFinalizationMeta({
+            feature: "project_wizard",
+            phase: "review",
+            turn: assistantState.turn || 0,
+            provider,
+            outputFormat: FINAL_OUTPUT_KIND.sql,
+            reply: repairReply,
+            sql: repairedSQL,
+          }));
+          logAssistantFinalizationEvent("assistant_sql_preview_ready", buildAssistantFinalizationMeta({
+            feature: "project_wizard",
+            phase: "review",
+            turn: assistantState.turn || 0,
+            provider,
+            outputFormat: FINAL_OUTPUT_KIND.sql,
+            reply: repairReply,
+            sql: repairedSQL,
+          }));
+          logAssistantFinalizationEvent("assistant_edge_call_started", buildAssistantFinalizationMeta({
+            feature: "project_wizard",
+            phase: WIZARD_CREATION_STATUS.creating,
+            turn: assistantState.turn || 0,
+            provider,
+            outputFormat: FINAL_OUTPUT_KIND.sql,
+            sql: repairedSQL,
+          }));
+          data = await executeProjectSQL(repairedSQL);
+          logAssistantFinalizationEvent("assistant_edge_response_received", buildAssistantFinalizationMeta({
+            feature: "project_wizard",
+            phase: WIZARD_CREATION_STATUS.creating,
+            turn: assistantState.turn || 0,
+            provider,
+            outputFormat: FINAL_OUTPUT_KIND.sql,
+            sql: repairedSQL,
+            edgeStatus: data.status,
+          }));
+        }
+
+        project = shapeCreatedProject(data.data.projet);
       }
 
-      const project = shapeCreatedProject(data.projet);
       if (!project) throw new Error("Projet cree mais payload incomplet.");
       updateAssistantState({
-        phase: "completed",
+        phase: "created",
+        creation_status: WIZARD_CREATION_STATUS.created,
         ready_to_generate: false,
       });
       try {
@@ -326,6 +642,33 @@ Renvoie uniquement un bloc \`\`\`sql ... \`\`\` complet et corrige.`,
       onCreated(project);
     } catch (e) {
       setError(e.message);
+      logAssistantFinalizationEvent("assistant_canonical_create_error", buildAssistantFinalizationMeta({
+        feature: "project_wizard",
+        phase: "creation_error",
+        turn: assistantState.turn || 0,
+        provider,
+        outputFormat: payloadPreview ? FINAL_OUTPUT_KIND.canonicalPayload : FINAL_OUTPUT_KIND.sql,
+        payload: payloadPreview,
+        sql: sqlPreview,
+        edgeError: e.message,
+      }));
+      if (!payloadPreview) {
+        logAssistantFinalizationEvent("assistant_edge_response_error", buildAssistantFinalizationMeta({
+          feature: "project_wizard",
+          phase: WIZARD_CREATION_STATUS.creation_error,
+          turn: assistantState.turn || 0,
+          provider,
+          outputFormat: FINAL_OUTPUT_KIND.sql,
+          sql: sqlPreview,
+          edgeStatus: e.edgeStatus || null,
+          edgeError: e.edgeError || e.message,
+        }));
+      }
+      updateAssistantState({
+        phase: "creation_error",
+        creation_status: WIZARD_CREATION_STATUS.creation_error,
+        ready_to_generate: true,
+      });
       setCreating(false);
     }
   };
@@ -487,8 +830,22 @@ Renvoie uniquement un bloc \`\`\`sql ... \`\`\` complet et corrige.`,
 
         {mode === "ai" && step === "chat" && (
           <div style={{display: "flex", flexDirection: "column", gap: 12}}>
+            {currentQuestion && (
+              <div style={{padding: "12px 14px", borderRadius: 10, background: "var(--sf2)", border: "1px solid var(--bd3)"}}>
+                <div style={{fontSize: 11, color: "var(--tx3)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6}}>
+                  Decision chantier {currentDecisionIndex + 1}
+                </div>
+                <div style={{fontSize: 14, fontWeight: 700, color: "var(--tx)"}}>{currentQuestion.prompt}</div>
+                {currentQuestion.recommended && (
+                  <div style={{marginTop: 8, display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 10px", borderRadius: 999, background: "var(--gbg)", border: "1px solid var(--gbd)", color: "var(--gtx)", fontSize: 12, fontWeight: 600}}>
+                    Recommande : {currentQuestion.recommended}
+                  </div>
+                )}
+              </div>
+            )}
+
             <div style={{display: "flex", flexDirection: "column", gap: 10, maxHeight: 320, overflowY: "auto"}}>
-              {messages.slice(1).map((message, index) => (
+              {visibleMessages.slice(1).map((message, index) => (
                 <div key={index} style={{display: "flex", justifyContent: message.role === "user" ? "flex-end" : "flex-start"}}>
                   <div
                     style={{
@@ -517,47 +874,115 @@ Renvoie uniquement un bloc \`\`\`sql ... \`\`\` complet et corrige.`,
               )}
             </div>
 
-            {quickChoices.length > 0 && !sqlPreview && (
-              <div style={{display: "flex", flexWrap: "wrap", gap: 8}}>
-                {quickChoices.map((choice, index) => (
-                  <button
-                    data-testid={`assistant-choice-${index}`}
-                    key={choice}
-                    onClick={() => toggleChoice(choice)}
-                    disabled={loading}
-                    style={{
-                      padding: "8px 12px",
-                      fontSize: 12,
-                      borderRadius: 999,
-                      border: `1px solid ${selectedChoices.includes(choice) ? "var(--btx)" : "var(--bbd)"}`,
-                      background: selectedChoices.includes(choice) ? "var(--btx)" : "var(--bbg)",
-                      color: selectedChoices.includes(choice) ? "#fff" : "var(--btx)",
-                      cursor: loading ? "default" : "pointer",
-                      opacity: loading ? 0.6 : 1,
+            {quickChoices.length > 0 && !hasFinalPreview && (
+              <div style={{display: "flex", flexDirection: "column", gap: 8}}>
+                {quickChoices.map((choice, index) => {
+                  const label = choice.label || choice;
+                  const checked = selectedChoices.includes(label);
+                  return (
+                    <label
+                      key={label}
+                      style={{
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: 10,
+                        padding: "10px 12px",
+                        borderRadius: 8,
+                        border: `1px solid ${checked ? "var(--btx)" : "var(--bd3)"}`,
+                        background: checked ? "var(--bbg)" : "var(--sf)",
+                        cursor: loading ? "default" : "pointer",
+                        opacity: loading ? 0.6 : 1,
+                      }}
+                    >
+                      <input
+                        data-testid={`assistant-choice-${index}`}
+                        type={currentQuestion?.type === "multiple" ? "checkbox" : "radio"}
+                        name={`wizard-question-${currentDecisionIndex}`}
+                        checked={checked}
+                        onChange={() => toggleChoice(label)}
+                        disabled={loading || dontKnow}
+                        style={{marginTop: 2, accentColor: "var(--btx)"}}
+                      />
+                      <div style={{display: "flex", flexDirection: "column", gap: 4}}>
+                        <span style={{fontSize: 13, color: "var(--tx)", fontWeight: checked ? 600 : 500}}>{label}</span>
+                        {currentQuestion?.recommended === label && (
+                          <span style={{fontSize: 11, color: "var(--gtx)", fontWeight: 600}}>Option recommandee</span>
+                        )}
+                      </div>
+                    </label>
+                  );
+                })}
+
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 10,
+                    padding: "10px 12px",
+                    borderRadius: 8,
+                    border: `1px solid ${dontKnow ? "var(--otx)" : "var(--bd3)"}`,
+                    background: dontKnow ? "var(--obg)" : "var(--sf)",
+                    cursor: loading ? "default" : "pointer",
+                    opacity: loading ? 0.6 : 1,
+                  }}
+                >
+                  <input
+                    data-testid="assistant-unknown-option"
+                    type="checkbox"
+                    checked={dontKnow}
+                    onChange={() => {
+                      const next = !dontKnow;
+                      setDontKnow(next);
+                      if (next) setSelectedChoices([]);
                     }}
-                  >
-                    {choice}
-                  </button>
-                ))}
+                    disabled={loading}
+                    style={{marginTop: 2, accentColor: "var(--otx)"}}
+                  />
+                  <div style={{display: "flex", flexDirection: "column", gap: 4}}>
+                    <span style={{fontSize: 13, color: "var(--tx)", fontWeight: dontKnow ? 600 : 500}}>Je ne sais pas</span>
+                    <span style={{fontSize: 11, color: "var(--tx3)"}}>
+                      Le wizard continue avec l'hypothese recommandee ou en suspens si ce point n'est pas bloquant.
+                    </span>
+                  </div>
+                </label>
               </div>
             )}
 
-            {!sqlPreview && (
+            {!hasFinalPreview && (
               <>
                 <input
                   data-testid="assistant-free-text-input"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendMessage()}
-                  placeholder={quickChoices.length > 0 ? "Ajoute une precision si besoin..." : "Reponds ou precise..."}
+                  placeholder="Autre / precision (facultatif)"
                   disabled={loading}
                   style={{...inp}}
                 />
-                <div style={{display: "flex", justifyContent: "flex-end"}}>
+                <div style={{display: "flex", justifyContent: "space-between", gap: 8}}>
+                  <button
+                    data-testid="assistant-back-button"
+                    onClick={() => setCurrentDecisionIndex((current) => Math.max(0, current - 1))}
+                    disabled={loading || currentDecisionIndex === 0}
+                    style={{
+                      padding: "0 16px",
+                      height: 34,
+                      fontSize: 13,
+                      fontWeight: 600,
+                      border: "1px solid var(--bd3)",
+                      borderRadius: 6,
+                      background: "var(--sf)",
+                      color: "var(--tx2)",
+                      cursor: loading || currentDecisionIndex === 0 ? "default" : "pointer",
+                      opacity: loading || currentDecisionIndex === 0 ? 0.5 : 1,
+                    }}
+                  >
+                    ← Retour
+                  </button>
                   <button
                     data-testid="assistant-next-button"
                     onClick={() => sendMessage()}
-                    disabled={loading || (!input.trim() && selectedChoices.length === 0)}
+                    disabled={loading || (!input.trim() && selectedChoices.length === 0 && !dontKnow)}
                     style={{
                       padding: "0 16px",
                       height: 34,
@@ -568,18 +993,20 @@ Renvoie uniquement un bloc \`\`\`sql ... \`\`\` complet et corrige.`,
                       background: "var(--btx)",
                       color: "#fff",
                       cursor: loading ? "default" : "pointer",
-                      opacity: loading || (!input.trim() && selectedChoices.length === 0) ? 0.5 : 1,
+                      opacity: loading || (!input.trim() && selectedChoices.length === 0 && !dontKnow) ? 0.5 : 1,
                     }}
                   >
-                    Suivant
+                    {currentDecisionIndex < decisionSteps.length - 1 ? "Recalculer la suite" : "Suivant"}
                   </button>
                 </div>
               </>
             )}
 
-            {sqlPreview && !loading && (
+            {hasFinalPreview && !loading && (
               <div style={{padding: "12px 14px", borderRadius: 10, background: "var(--gbg)", border: "1px solid var(--gbd)", color: "var(--gtx)", fontSize: 13}}>
-                Le dossier est pret. Tu peux lancer la creation du projet.
+                {payloadPreview
+                  ? "Le payload canonique est pret. Tu peux lancer la creation du projet."
+                  : "Le dossier est pret. Tu peux lancer la creation du projet."}
               </div>
             )}
           </div>
@@ -601,6 +1028,8 @@ Renvoie uniquement un bloc \`\`\`sql ... \`\`\` complet et corrige.`,
             setMode((current) => (current === "ai" ? "manual" : "ai"));
             setStep("config");
             setError("");
+            setPayloadPreview(null);
+            setSqlPreview("");
           }}
           style={{
             padding: "8px 16px",
@@ -678,7 +1107,7 @@ Renvoie uniquement un bloc \`\`\`sql ... \`\`\` complet et corrige.`,
               >
                 Annuler
               </button>
-              {sqlPreview && (
+              {hasFinalPreview && (
                 <button
                   data-testid="assistant-create-project-button"
                   onClick={createProjectAI}

@@ -24,6 +24,9 @@ describe("assistantState", () => {
     expect(state.metiers_draft).toEqual([]);
     expect(state.last_question).toBeNull();
     expect(state.last_user_answer).toBeNull();
+    expect(state.final_output).toBeNull();
+    expect(state.final_sql).toBe("");
+    expect(state.creation_status).toBe("clarification");
     expect(state.confidence).toBe("low");
     expect(state.ready_to_generate).toBe(false);
     expect(typeof state.updated_at).toBe("string");
@@ -42,6 +45,9 @@ describe("assistantState", () => {
     expect(state.phase).toBe("idle");
     expect(state.known_facts).toEqual({});
     expect(state.missing_fields).toEqual([]);
+    expect(state.final_output).toBeNull();
+    expect(state.final_sql).toBe("");
+    expect(state.creation_status).toBe("clarification");
     expect(state.ready_to_generate).toBe(false);
   });
 
@@ -74,6 +80,9 @@ describe("assistantState", () => {
     expect(state.suspens).toEqual([]);
     expect(state.lots_draft).toEqual([]);
     expect(state.metiers_draft).toEqual([]);
+    expect(state.final_output).toBeNull();
+    expect(state.final_sql).toBe("");
+    expect(state.creation_status).toBe("clarification");
     expect(state.confidence).toBe("low");
     expect(state.ready_to_generate).toBe(false);
     expect(typeof state.updated_at).toBe("string");
@@ -86,6 +95,7 @@ describe("assistantState", () => {
       turn: 1,
       last_user_answer: "Maison 3 facades",
       last_question: "Quel niveau de finition ?",
+      creation_status: "clarification",
     });
 
     expect(next.flow).toBe("new_project_wizard");
@@ -93,7 +103,38 @@ describe("assistantState", () => {
     expect(next.turn).toBe(1);
     expect(next.last_user_answer).toBe("Maison 3 facades");
     expect(next.last_question).toBe("Quel niveau de finition ?");
+    expect(next.creation_status).toBe("clarification");
     expect(next.ready_to_generate).toBe(false);
+  });
+
+  it("keeps final output separate from last_question and last_user_answer", () => {
+    const next = mergeAssistantState(createEmptyAssistantState("new_project_wizard"), {
+      last_user_answer: "Choix retenu: Standard",
+      last_question: "Quel niveau de finition faut-il retenir ?",
+      final_output: {
+        kind: "canonical_payload",
+        content: {
+          version: "v1",
+          project: { client_nom: "Projet Test" },
+        },
+      },
+      final_sql: "INSERT INTO bl_projects ...",
+      creation_status: "ready_to_create",
+      ready_to_generate: true,
+    });
+
+    expect(next.last_user_answer).toBe("Choix retenu: Standard");
+    expect(next.last_question).toBe("Quel niveau de finition faut-il retenir ?");
+    expect(next.final_output).toEqual({
+      kind: "canonical_payload",
+      content: {
+        version: "v1",
+        project: { client_nom: "Projet Test" },
+      },
+    });
+    expect(next.final_sql).toContain("INSERT INTO bl_projects");
+    expect(next.creation_status).toBe("ready_to_create");
+    expect(next.ready_to_generate).toBe(true);
   });
 
   it("mergeAssistantState(prev, patch) merges nested known_facts without dropping previous keys", () => {

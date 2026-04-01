@@ -1,332 +1,299 @@
 # CLAUDE.md — BuildLogic ONA
 
-Contexte de référence pour Claude Code et toute nouvelle session Claude.
-Ce fichier contient tout ce qu'il faut pour reprendre le développement sans friction.
-
----
+Contexte de reprise pour toute session Claude/Codex sur ce repo.
+Objectif: repartir vite, sans réintroduire l'ancien flow SQL comme chemin principal.
 
 ## Identité du projet
 
-- **Produit** : BuildLogic — outil de budgétisation chantier pour ONA Group SRL (Bruxelles/Brabant)
-- **Stack** : React 18 + Vite · Supabase JS direct · GitHub Pages CI/CD
-- **Repo** : https://github.com/Kinsuka/buildlogic
-- **App** : https://kinsuka.github.io/buildlogic/
-- **Supabase project ID** : `abbaqmjidclmmwqcutlj`
+- Produit: BuildLogic, outil de chiffrage chantier pour ONA Group SRL
+- Zone métier: rénovation Bruxelles / Brabant, prix HTVA
+- Stack: React 18 + Vite + Supabase JS
+- Repo: `https://github.com/Kinsuka/buildlogic`
+- App: `https://kinsuka.github.io/buildlogic/`
+- Supabase project ref: `abbaqmjidclmmwqcutlj`
 
----
+## Règles absolues
 
-## Architecture
+- Modifications chirurgicales uniquement.
+- Ne pas reconstruire l'app from scratch.
+- Le flow cible du wizard est: `assistant -> payload canonique v1 -> validation/normalisation -> mapper applicatif -> Supabase`.
+- Le SQL généré par LLM est un fallback legacy temporaire, pas la cible.
+- Le LLM ne doit pas générer d'UUID ni de SQL quand il peut produire le payload canonique.
 
+## Architecture actuelle
+
+```text
+UI React
+  -> NewProjectModal.jsx
+  -> buildONASystemPrompt()
+  -> appel LLM
+  -> payload canonique JSON
+  -> validateCanonicalProjectPayload()
+  -> createProjectFromCanonicalPayload()
+  -> inserts Supabase bl_*
+  -> snapshot projet reconstruit côté app
+
+Fallback legacy temporaire:
+  -> bloc SQL
+  -> Edge Function exec-project-sql
 ```
-GitHub (src/) → GitHub Actions (npm run build → dist/) → GitHub Pages
-Claude (conversation) → MCP Supabase → INSERT bl_* → triggers → projet_json → BuildLogic charge
-```
 
-**Règle absolue** : modifications chirurgicales uniquement. Ne jamais reconstruire from scratch.
+## Fichiers clés
 
----
-
-## Structure des fichiers (post-refactor Codex mars 2026)
-
-```
+```text
 src/
-  App.jsx                        ← orchestration globale, state principal, totaux
-  supabase.js                    ← client Supabase (clé anon — à migrer vers import.meta.env)
+  App.jsx
+  supabase.js
   components/
-    Modal.jsx                    ← composant modal de base
-    Toast.jsx
-    BtnMenu.jsx
-    ErrorBoundary.jsx
-    LotCard.jsx
-    MetierRow.jsx
-    LineCardMO.jsx
-    LineCardMat.jsx
-    ProjSelectorModal.jsx
-    NewProjectModal.jsx
-    HowToStartModal.jsx
-    DocumentationModal.jsx
-    ReferentielModal.jsx
-    FicheClientModal.jsx
-    FicheMetiersModal.jsx
-    RapportModal.jsx
-    HistoryPanel.jsx
+    NewProjectModal.jsx          <- wizard IA principal + fallback SQL legacy
+    ProjectChatPanel.jsx         <- chat projet
   lib/
-    calculs.js                   ← moLV, matLV, lotTotals, grandTotalGamme, joursChantier...
-    projects.js                  ← accès projets Supabase + cache local
-    appCss.js                    ← CSS global
-    referentielSnapshot.js       ← snapshot embarqué (PAS live Supabase)
-    howToContent.js              ← contenu modale "Comment démarrer"
-    documentationContent.js      ← contenu documentation intégrée
-    referentielUiContent.js      ← libellés UI du référentiel
+    llm.js                       <- prompt wizard/projet + extraction json/sql
+    assistantReferenceContext.js <- référentiel métier compact orienté génération
+    assistantFramework.js        <- règles de questionnement / comité assistant
+    assistantReviewSynthesis.js  <- contexte de review wizard/projet
+    assistantState.js            <- état structuré assistant
+    assistantFinalization.js     <- phases + logs finalisation wizard
+    canonicalProjectContract.js  <- validation/normalisation payload canonique v1
+    createProjectFromCanonicalPayload.js
+    projects.js
+    referentielSnapshot.js       <- snapshot embarqué, pas référentiel live du wizard
+docs/
+  data/contrat-payload-canonique-v1.md
+tests/
+  e2e/regressions.spec.ts
+  e2e/support/mockApi.ts
 ```
 
-> ⚠️ **Le référentiel est un snapshot embarqué**, pas live Supabase.
-> Les projets (`bl_projects`) sont eux chargés depuis Supabase en live.
+## Contrat canonique v1
 
-**Pour modifier du contenu statique** (doc, rendements, référentiel) :
-→ Modifier le fichier `src/lib/` concerné, pas `App.jsx`
+Référence: `docs/data/contrat-payload-canonique-v1.md`
 
----
+Principes:
 
-## Schéma Supabase — tables bl_*
+- `version` vaut `v1`
+- `project.statut` vaut `draft`
+- `project.tva` vaut `6` ou `21`
+- `suspens.niveau` vaut `rouge`, `orange` ou `vert`
+- `lot.sequence` contient des `metier_key`, jamais des labels affichés
+- `mat_lines[].avec_unite` est le booléen canonique à conserver
 
-### `bl_projects`
-```sql
-id             UUID PK
-client_nom     TEXT NOT NULL
-adresse        TEXT
-tva            NUMERIC DEFAULT 6
-date_visite    DATE
-validite       INTEGER DEFAULT 30
-store_key      TEXT UNIQUE       -- ex: 'ona_bl_barbosa2026'
-statut         TEXT DEFAULT 'draft' -- draft | sent | accepted | rejected
-rapport_visite TEXT
-notes_internes TEXT
-projet_json    JSONB             -- calculé automatiquement par trigger
-created_at     TIMESTAMPTZ
-updated_at     TIMESTAMPTZ
-```
+Conventions recommandées:
 
-### `bl_lots`
-```sql
-id           UUID PK
-project_id   UUID FK → bl_projects.id (CASCADE DELETE)
-lot_key      TEXT    -- 'l1', 'l2'...
-title        TEXT
-meta         TEXT
-imprevu_pct  NUMERIC DEFAULT 10
-sequence     TEXT[]  -- ⚠️ OBLIGATOIRE — ex: ARRAY['🔧 Plombier','⬛ Carreleur']
-default_open BOOLEAN DEFAULT false
-ordre        INTEGER DEFAULT 0
-```
+- `lot_key`: `lot_<slug>`
+- `metier_key`: `plomberie`, `carrelage`, `electricite`, etc.
+- `line_key`: slug court métier/prestation/fourniture
 
-### `bl_metiers`
-```sql
-id          UUID PK
-lot_id      UUID FK → bl_lots.id (CASCADE DELETE)
-metier_key  TEXT    -- 'p1', 'c1', 'e1'...
-name        TEXT
-icon        TEXT
-ordre       INTEGER DEFAULT 0
-```
+Important:
 
-### `bl_mo_lines`
-```sql
-id              UUID PK
-metier_id       UUID FK → bl_metiers.id (CASCADE DELETE)
-line_key        TEXT    -- 'a', 'b', 'c'...
-label           TEXT
-j_lo            NUMERIC DEFAULT 0.5
-j_sug           NUMERIC DEFAULT 1
-j_hi            NUMERIC DEFAULT 2
-tx_lo           NUMERIC DEFAULT 280
-tx_sug          NUMERIC DEFAULT 340
-tx_hi           NUMERIC DEFAULT 400
-ordre           INTEGER DEFAULT 0
-nb_travailleurs INTEGER DEFAULT 1 CHECK (1..10)
-```
+- Le mapper convertit encore `lot.sequence` en labels métier au moment de l'insert DB pour compatibilité avec l'app actuelle.
+- Ne pas rebasculer la logique amont vers des labels dans le payload canonique.
 
-### `bl_mat_lines`
-```sql
-id         UUID PK
-metier_id  UUID FK → bl_metiers.id (CASCADE DELETE)
-line_key   TEXT    -- 'm1', 'm2'...
-label      TEXT
-avec_unite BOOLEAN DEFAULT false  -- ⚠️ PAS is_surface
-q_base     NUMERIC
-d_base     TEXT
-props      JSONB DEFAULT '[]'
-ordre      INTEGER DEFAULT 0
-```
+## Wizard IA
 
-**Format props :**
-```json
-[{"name":"Grès 60×60","std":{"lo":12,"sug":18,"hi":30},"mid":{"lo":18,"sug":28,"hi":45},"sup":{"lo":28,"sug":42,"hi":65}}]
-```
+Fichier principal: `src/components/NewProjectModal.jsx`
 
-### `bl_suspens`
-```sql
-id         UUID PK
-project_id UUID FK → bl_projects.id (CASCADE DELETE)
-texte      TEXT    -- ⚠️ PAS 'txt'
-niveau     TEXT DEFAULT 'orange' -- rouge | orange | vert
-ordre      INTEGER DEFAULT 0
-```
+Le wizard gère maintenant explicitement:
 
----
+- `last_question`
+- `last_user_answer`
+- `final_output`
+- `payloadPreview`
+- `sqlPreview`
 
-## Triggers Postgres
+Phases / statuts à respecter:
 
-5 triggers sur `bl_lots`, `bl_metiers`, `bl_mo_lines`, `bl_mat_lines`, `bl_suspens`
-→ Appellent `refresh_projet_json(project_id)` automatiquement.
+- `clarification`
+- `ready_to_create`
+- `creating`
+- `created`
+- `creation_error`
 
-```sql
--- Forcer recalcul manuel
-SELECT refresh_projet_json('UUID_DU_PROJET');
-```
+Détection sortie finale:
 
----
+- priorité 1: bloc JSON canonique
+- priorité 2: bloc SQL legacy
+- sinon: poursuite des questions
 
-## Référentiel (tables non-bl_*)
+Chemin de création:
 
-### `mo_tarifs` — 14 métiers
-```sql
-metier          TEXT UNIQUE
-icon            TEXT
-prix_lo         NUMERIC   -- €/jour minimum
-prix_sug        NUMERIC   -- €/jour suggéré
-prix_hi         NUMERIC   -- €/jour maximum
-note            TEXT
-coeff_collectif NUMERIC   -- 0.75 à 0.95
-tx_h_lo         NUMERIC   -- tarif horaire min BE 2026 HTVA
-tx_h_hi         NUMERIC   -- tarif horaire max BE 2026 HTVA
-source_tarif    TEXT      -- trustup.be, tafsquare.com...
-```
+- si `payloadPreview`: `createProjectFromCanonicalPayload(payloadPreview, sb)`
+- sinon fallback SQL via `exec-project-sql`
 
-| Métier | lo €/j | sug €/j | hi €/j | €/h BE |
-|---|---|---|---|---|
-| Maçon | 320 | 400 | 560 | 40–70 |
-| Plombier | 400 | 480 | 640 | 50–80 |
-| Électricien | 280 | 360 | 440 | 35–55 |
-| Carreleur | 250 | 320 | 400 | 30–50 |
-| Plafonneur | 280 | 360 | 440 | 35–55 |
-| Menuisier | 280 | 380 | 480 | 35–60 |
-| Peintre | 240 | 300 | 380 | 30–48 |
-| Couvreur | 320 | 420 | 560 | 40–70 |
-| Chauffagiste | 400 | 500 | 640 | 50–80 |
-| Parqueteur | 240 | 320 | 420 | 30–53 |
-| Façadier | 260 | 340 | 440 | 33–55 |
-| Démolisseur | 250 | 320 | 400 | 31–50 |
-| Technicien VMC | 360 | 460 | 580 | 45–73 |
-| Cuisiniste | 260 | 340 | 440 | 33–55 |
+## Contexte métier assistant
 
-Coefficients collectif : Peintre 0.95 · Démolisseur 0.92 · Carreleur/Parqueteur 0.90
-Façadier 0.88 · Maçon/Plafonneur/Élec/Couvreur 0.85 · Cuisiniste 0.82 · Menuisier 0.80
-Plombier/VMC/Chauffagiste 0.75
+Le wizard ne doit pas recevoir la base brute entière.
+Il consomme un référentiel compact de génération via `buildAssistantReferenceContext(...)`.
 
-### `mo_rendements` — 190 prestations
-```sql
-metier prestation unite r_min r_sug r_max note
-coeff_complexite_reno NUMERIC DEFAULT 1.0
-source_coeff TEXT
-ordre INTEGER
-```
-Coefficients réno : Maçon ×1.50 · Plafonneur/Élec/Façadier ×1.40 · Couvreur/Plombier/VMC ×1.35
-Carreleur/Menuisier/Chauffagiste ×1.30 · Parqueteur/Peintre ×1.25 · Démolisseur/Cuisiniste ×1.20
+Sources live chargées dans `buildONASystemPrompt()`:
 
----
+- `mo_tarifs`
+- `mo_rendements`
+- `materiaux`
+- `postes_systematiques`
 
-## Template INSERT nouveau projet
+Le référentiel compact injecté dans le prompt contient:
 
-```sql
--- 1. Projet
-INSERT INTO bl_projects (client_nom, adresse, store_key, statut, tva, validite, date_visite, notes_internes)
-VALUES ('NOM', 'VILLE', 'ona_bl_NOMCLIENT2026', 'draft', 6, 30, 'YYYY-MM-DD', 'Notes')
-RETURNING id;
+- métiers disponibles
+- `metier_key` suggérés
+- titres de lots typiques
+- prestations typiques
+- templates de lignes MO
+- templates de lignes matériaux
+- conventions de structure
+- postes systématiques à vérifier
 
--- 2. Lots + métiers + lignes dans DO $$
-DO $$
-DECLARE
-  proj_id UUID := 'UUID_CI-DESSUS';
-  l1 UUID; m1 UUID;
-BEGIN
+À ne pas faire:
 
-INSERT INTO bl_lots (project_id, lot_key, title, meta, imprevu_pct, ordre, default_open, sequence)
-VALUES (proj_id, 'l1', 'Lot 1 — Titre', 'description', 10, 1, true,
-        ARRAY['🔧 Plombier', '⬛ Carreleur'])   -- ⚠️ sequence OBLIGATOIRE
-RETURNING id INTO l1;
+- injecter tout `referentielSnapshot.js` tel quel dans le prompt
+- injecter la base brute complète au LLM
 
-INSERT INTO bl_metiers (lot_id, metier_key, name, icon, ordre)
-VALUES (l1, 'p1', 'Plombier', '🔧', 1) RETURNING id INTO m1;
+## Assistant state
 
-INSERT INTO bl_mo_lines (metier_id, line_key, label, j_lo, j_sug, j_hi, tx_lo, tx_sug, tx_hi, ordre)
-VALUES (m1, 'a', 'Prestation', 1, 2, 3, 400, 480, 640, 1);
+Fichier: `src/lib/assistantState.js`
 
-INSERT INTO bl_mat_lines (metier_id, line_key, label, avec_unite, q_base, ordre, props)
-VALUES (m1, 'm1', 'Matériau', true, 10, 1,
-        '[{"name":"Std","std":{"lo":10,"sug":15,"hi":25},"mid":{"lo":15,"sug":22,"hi":35},"sup":{"lo":22,"sug":32,"hi":50}}]');
+Champs structurants:
 
-END $$;
+- `phase`
+- `turn`
+- `known_facts`
+- `missing_fields`
+- `assumptions`
+- `suspens`
+- `lots_draft`
+- `metiers_draft`
+- `last_question`
+- `last_user_answer`
+- `final_output`
+- `final_sql`
+- `creation_status`
+- `ready_to_generate`
 
--- 3. Suspens SÉPARÉMENT (hors DO pour éviter rollback)
-INSERT INTO bl_suspens (project_id, texte, niveau, ordre) VALUES
-  ('UUID_PROJET', 'Point à vérifier', 'rouge', 1);
+Persistences actuelles:
 
--- 4. Recalcul
-SELECT refresh_projet_json('UUID_PROJET');
-```
+- wizard nouveau projet: `localStorage`
+- chat projet: `st_json.assistant.project_chat` dans Supabase
 
----
+## Schéma Supabase utile
+
+Tables de création projet:
+
+- `bl_projects`
+- `bl_suspens`
+- `bl_lots`
+- `bl_metiers`
+- `bl_mo_lines`
+- `bl_mat_lines`
+
+Tables référentiel utiles au wizard:
+
+- `mo_tarifs`
+- `mo_rendements`
+- `materiaux`
+- `postes_systematiques`
+
+Point d'attention DB:
+
+- `bl_lots.sequence` reste aujourd'hui orienté affichage en base
+- plusieurs tables référentiel n'ont pas encore RLS activé
+- l'Edge Function `exec-project-sql` existe encore pour le fallback
+
+## Mapper canonique
+
+Fichier: `src/lib/createProjectFromCanonicalPayload.js`
+
+Responsabilités:
+
+- valider le payload via `validateCanonicalProjectPayload`
+- générer les ids techniques
+- générer `store_key` si absent
+- construire un plan d'insert testable
+- insérer dans l'ordre:
+  - `bl_projects`
+  - `bl_suspens`
+  - `bl_lots`
+  - `bl_metiers`
+  - `bl_mo_lines`
+  - `bl_mat_lines`
+- reconstruire un snapshot projet "app-ready"
+
+Ne pas réintroduire:
+
+- génération SQL par le LLM comme voie principale
+- logique d'UUID dans le prompt
 
 ## Pièges à éviter
 
-| Erreur | Correct |
+| Mauvais réflexe | Attendu |
 |---|---|
-| `display_order` | `ordre` |
-| `is_surface` | `avec_unite` |
-| `txt` dans bl_suspens | `texte` |
-| `sequence` null | Toujours `ARRAY['...']` |
-| Suspens dans DO $$ | Insérer SÉPARÉMENT |
-| `refresh_projet_json` oublié | Toujours appeler |
-| Modifier App.jsx pour du contenu | Modifier `src/lib/` concerné |
+| Rebrancher le wizard sur SQL preview en premier | Utiliser d'abord le payload canonique |
+| Mettre des labels métier dans `sequence` canonique | Mettre des `metier_key` |
+| Utiliser `is_surface` | Utiliser `avec_unite` |
+| Utiliser `txt` dans les suspens | Utiliser `texte` |
+| Oublier `final_output` dans l'état assistant | Le tenir à jour explicitement |
+| Injecter tout le référentiel brut au prompt | Injecter le contexte compact |
+| Modifier `App.jsx` pour du contenu statique | Modifier `src/lib/` concerné |
 
----
+## Références métier rapides
 
-## Convention nommage
+Ordres de grandeur actuellement disponibles en base:
 
-- `store_key` : `ona_bl_NOMCLIENT2026`
-- `lot_key` : `l1`, `l2`...
-- `metier_key` : `p1` plombier · `c1` carreleur · `e1` élec · `me1` menuisier · `pe1` peintre · `pl1` plafonneur · `pa1` parqueteur · `cu1` cuisiniste · `m1` maçon
-- `line_key` MO : `a`, `b`, `c`...
-- `line_key` Mat : `m1`, `m2`...
+- `mo_tarifs`: 14 métiers
+- `mo_rendements`: ~190 prestations
+- `materiaux`: ~111 lignes
+- `postes_systematiques`: ~12 lignes
 
----
+Exemples utiles déjà observés:
 
-## Workflow développement
+- Plombier: `WC suspendu Geberit+bâti`, `Création alimentation eau`
+- Carreleur: `Pose carrelage sol 60×60`, `Étanchéité liquide zones humides (SPEC)`
+- Matériaux: `WC suspendu + bâti`, `Receveur de douche`, `Grès cérame 60×60`, `Prise / interrupteur`
+
+## Tests utiles
+
+Unitaires ciblés:
 
 ```bash
-git add src/
-git commit -m "description"
-git push
-# → GitHub Actions → GitHub Pages (~2 min)
-# → https://kinsuka.github.io/buildlogic/
+npm test -- --run src/lib/assistantReferenceContext.test.js src/lib/createProjectFromCanonicalPayload.test.js src/lib/assistantFramework.test.js
 ```
 
----
+Régressions wizard:
 
-## Backlog technique
+```bash
+npm run test:e2e -- tests/e2e/regressions.spec.ts
+```
 
-- [ ] Config Supabase via `import.meta.env` (actuellement codée en dur)
-- [ ] Corriger wording "référentiel live Supabase" dans l'app (c'est un snapshot)
-- [ ] Corriger mentions "Netlify" encore dans l'app
-- [ ] Tests sur `src/lib/calculs.js`
-- [ ] Lint/quality check dans la CI
+Build:
 
----
+```bash
+npm run build
+```
 
-## Projets existants
+Couverture importante déjà en place:
 
-| Client | store_key | Statut |
-|---|---|---|
-| Emeline (Halle) | `ona_bl_emeline2026` | 6 lots — référence |
-| Barbosa (Ninove) | `ona_bl_barbosa2026` | 8 lots, 2 maisons |
-| Demo Client | `ona_bgt_v6_demo` | Démo |
-| Kevin | `ona_bl_mn7997wm` | Vide test |
+- détection sortie finale canonique
+- fallback SQL legacy
+- absence de sortie finale
+- erreurs edge fallback
+- cohérence du mapper canonique
+- référentiel compact injecté dans le prompt au niveau unitaire
 
----
+## Backlog réaliste
 
-## Fonctionnalités BuildLogic v8
+- migrer `supabase.js` vers `import.meta.env`
+- décider quand supprimer définitivement `exec-project-sql`
+- faire évoluer `bl_lots.sequence` pour stocker des `metier_key` en base
+- compléter les scénarios add/remove structurés dans les tables relationnelles
+- renforcer l'audit RLS / policies
 
-- Chargement dynamique projets Supabase (< 300ms)
-- 3 gammes std/mid/sup · fourchettes lo/sug/hi
-- Nb travailleurs (1-4) + frais déplacement par ligne MO
-- Coefficient collectif par métier
-- Mode client / interne
-- Export Markdown + Rapport
-- Audit MO vs mo_rendements
-- Documentation intégrée (6 onglets) + Patch notes
-- ErrorBoundary + guards null complets
-- Tarifs horaires BE 2026 dans référentiel
-- Dark mode persisté localStorage
+## État de vérité
 
-*Dernière mise à jour : 29 mars 2026 — post-refactor Codex, architecture modulaire*
+En cas de doute, la vérité du flow actuel est dans:
+
+- `src/components/NewProjectModal.jsx`
+- `src/lib/llm.js`
+- `src/lib/assistantReferenceContext.js`
+- `src/lib/createProjectFromCanonicalPayload.js`
+- `docs/data/contrat-payload-canonique-v1.md`
+
+Dernière mise à jour: 31 mars 2026

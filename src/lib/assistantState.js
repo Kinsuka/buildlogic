@@ -1,4 +1,4 @@
-export const ASSISTANT_STATE_VERSION = 1;
+export const ASSISTANT_STATE_VERSION = 2;
 
 export const ASSISTANT_STATE_KEYS = {
   newProjectWizard: "assistant.new_project_wizard",
@@ -29,6 +29,16 @@ function asNumber(value, fallback = 0) {
   return Number.isFinite(value) ? value : fallback;
 }
 
+function normalizeFinalOutput(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const kind = asString(value.kind);
+  if (!kind) return null;
+  return {
+    kind,
+    content: value.content ?? null,
+  };
+}
+
 export function createEmptyAssistantState(flow) {
   return {
     version: ASSISTANT_STATE_VERSION,
@@ -45,6 +55,9 @@ export function createEmptyAssistantState(flow) {
     metiers_draft: [],
     last_question: null,
     last_user_answer: null,
+    final_output: null,
+    final_sql: "",
+    creation_status: "clarification",
     confidence: "low",
     ready_to_generate: false,
     updated_at: nowIso(),
@@ -70,6 +83,9 @@ export function normalizeAssistantState(input, flow) {
     metiers_draft: asArray(state.metiers_draft),
     last_question: state.last_question ?? base.last_question,
     last_user_answer: state.last_user_answer ?? base.last_user_answer,
+    final_output: normalizeFinalOutput(state.final_output),
+    final_sql: asString(state.final_sql, base.final_sql),
+    creation_status: asString(state.creation_status, base.creation_status),
     confidence: asString(state.confidence, base.confidence),
     ready_to_generate: asBoolean(state.ready_to_generate, false),
     updated_at: asString(state.updated_at, base.updated_at),

@@ -1,4 +1,18 @@
 import { sb } from "../supabase.js";
+import { normalizeBelgianTerminology } from "./assistantBelgium.js";
+import {
+  buildAssistantReferenceContext,
+  formatAssistantReferenceContext,
+} from "./assistantReferenceContext.js";
+import {
+  buildAssistantCommitteeFramework,
+  buildProjectChatPolicyBlock,
+  buildWizardQuestioningPolicyBlock,
+} from "./assistantFramework.js";
+import {
+  buildProjectReviewContext,
+  buildWizardReviewContext,
+} from "./assistantReviewSynthesis.js";
 
 function estimateChars(value) {
   if (!value) return 0;
@@ -12,6 +26,11 @@ function estimateChars(value) {
 
 function countTurns(messages) {
   return (messages || []).filter((message) => message?.role === "user").length;
+}
+
+function extractFencedBlock(text, language) {
+  const match = text?.match(new RegExp(`\`\`\`${language}\\s*([\\s\\S]+?)\`\`\``, "i"));
+  return match ? match[1].trim() : null;
 }
 
 function logLLMDebug(stage, payload) {
@@ -118,6 +137,12 @@ export async function callLLM(messages, system, provider, apiKey, meta = {}) {
   }
 
   const parsed = config.parse(await res.json());
+  const hasSqlOutput = Boolean(extractSQL(parsed));
+  const hasCanonicalPayload = Boolean(extractCanonicalPayload(parsed));
+  const response =
+    (meta.feature === "project_wizard" || meta.feature === "project_chat") && !hasSqlOutput && !hasCanonicalPayload
+      ? normalizeBelgianTerminology(parsed)
+      : parsed;
 
   logLLMDebug("response", {
     provider,
@@ -126,75 +151,139 @@ export async function callLLM(messages, system, provider, apiKey, meta = {}) {
     turn: meta.turn || turns,
     messageCount: messages.length,
     promptChars,
-    responseChars: estimateChars(parsed),
+    responseChars: estimateChars(response),
   });
 
-  return parsed;
+  return response;
 }
 
-export async function buildONASystemPrompt() {
-  const { data: tarifs, error } = await sb
-    .from("mo_tarifs")
-    .select("metier,prix_lo,prix_sug,prix_hi,tx_h_lo,tx_h_hi")
-    .order("metier");
+export function buildONASystemPromptFromData(options = {}) {
+  const {
+    rapport = "",
+    tarifs = [],
+    rendements = [],
+    materiaux = [],
+    postesSystematiques = [],
+  } = options;
+  const reviewContext = rapport ? `\n\n${buildWizardReviewContext(rapport)}` : "";
+  const referenceContext = buildAssistantReferenceContext({
+    tarifs,
+    rendements,
+    materiaux,
+    postesSystematiques,
+  });
+  const referenceBlock = formatAssistantReferenceContext(referenceContext);
 
-  if (error) throw error;
+  return `Tu es le chef de chantier central chez ONA Group SRL, entreprise de renovation a Bruxelles/Brabant, Belgique. Tous les prix sont HTVA.
 
-  const tarifStr = (tarifs || [])
-    .map((tarif) =>
-      `${tarif.metier}: ${tarif.prix_lo}/${tarif.prix_sug}/${tarif.prix_hi} €/j (${tarif.tx_h_lo}-${tarif.tx_h_hi} €/h)`
-    )
-    .join("\n");
+${buildAssistantCommitteeFramework()}
 
-  return `Tu es chef de chantier chez ONA Group SRL, entreprise de renovation a Bruxelles/Brabant, Belgique. Tous les prix sont HTVA.
+${buildWizardQuestioningPolicyBlock()}
+${reviewContext}
 
-TARIFS DE REFERENCE ONA 2026 (lo/sug/hi €/jour):
-${tarifStr}
+${referenceBlock}
 
 Tu poses UNE question a la fois. Chaque question propose des choix courts cliquables + une option "Autre / precision". Tu ne passes a la suite que quand l'utilisateur a repondu.
+Tu privilegies les questions chantier et budget. Hors nom et adresse si absents, tu ne perds pas de tours sur des details administratifs non utiles.
+Quand l'utilisateur repond "Je ne sais pas", tu ne bloques pas : tu proposes l'hypothese recommandee la plus credible ou tu bascules le point en suspens si ce n'est pas bloquant.
 
-SCHEMA SQL A RESPECTER STRICTEMENT
-Table bl_projects:
-- id UUID PK
-- client_nom TEXT NOT NULL
-- adresse TEXT
-- tva NUMERIC DEFAULT 6
-- date_visite DATE
-- validite INTEGER DEFAULT 30
-- store_key TEXT UNIQUE
-- statut TEXT DEFAULT 'draft'
-- rapport_visite TEXT
-- notes_internes TEXT
+CONTRAT DE SORTIE CANONIQUE A RESPECTER STRICTEMENT
+Tu ne generes ni SQL ni UUID si tu peux produire le payload canonique.
 
-Table bl_lots:
-- project_id, lot_key, title, meta, imprevu_pct, sequence, default_open, ordre
-
-Table bl_metiers:
-- lot_id, metier_key, name, icon, ordre
-
-Table bl_mo_lines:
-- metier_id, line_key, label, j_lo, j_sug, j_hi, tx_lo, tx_sug, tx_hi, ordre, nb_travailleurs
-
-Table bl_mat_lines:
-- metier_id, line_key, label, avec_unite, q_base, d_base, props, ordre
-
-Table bl_suspens:
-- project_id, texte, niveau, ordre
+Structure finale attendue :
+{
+  "version": "v1",
+  "project": {
+    "client_nom": "...",
+    "adresse": "...",
+    "tva": 6,
+    "date_visite": "YYYY-MM-DD",
+    "validite": 30,
+    "store_key": "",
+    "statut": "draft",
+    "rapport_visite": "...",
+    "notes_internes": "..."
+  },
+  "suspens": [
+    {"texte": "...", "niveau": "orange", "ordre": 1}
+  ],
+  "lots": [
+    {
+      "lot_key": "lot_<slug>",
+      "title": "...",
+      "meta": "...",
+      "imprevu_pct": 10,
+      "sequence": ["plomberie", "carrelage"],
+      "default_open": true,
+      "ordre": 1,
+      "metiers": [
+        {
+          "metier_key": "plomberie",
+          "name": "Plombier",
+          "icon": "🔧",
+          "ordre": 1,
+          "mo_lines": [],
+          "mat_lines": []
+        }
+      ]
+    }
+  ]
+}
 
 INTERDICTIONS CRITIQUES
 - N'utilise JAMAIS les colonnes nom, client, ville, code_postal, pays, date_debut_prev, date_fin_prev, budget_htva
-- Pour bl_projects utilise uniquement client_nom, adresse, tva, date_visite, validite, store_key, statut, rapport_visite, notes_internes
-- bl_suspens.texte existe, pas txt
-- bl_mat_lines.avec_unite existe, pas is_surface
-- bl_lots.ordre existe, pas display_order
-- bl_lots.sequence doit toujours etre rempli avec ARRAY[...]
+- project.statut vaut toujours "draft"
+- project.tva vaut uniquement 6 ou 21
+- suspens.niveau vaut uniquement rouge, orange ou vert
+- lot.sequence contient toujours des metier_key, jamais des labels metier
+- bl_mat_lines.avec_unite correspond au champ canonique mat_lines[].avec_unite
 
-Quand tu as toutes les infos, genere le SQL complet dans un bloc \`\`\`sql...\`\`\` en respectant cet ordre :
-1. INSERT INTO bl_projects (...) VALUES (...) RETURNING id — store_key format: 'ona_bl_NOMVILLE2026'
-2. Bloc DO $$ avec bl_lots (sequence ARRAY[...] OBLIGATOIRE), bl_metiers, bl_mo_lines, bl_mat_lines
-3. INSERT INTO bl_suspens ... SEPAREMENT du bloc DO
-4. SELECT refresh_projet_json('UUID')
-5. La reponse finale ne contient QUE le bloc SQL, sans explication autour, si et seulement si toutes les infos sont reunies`;
+Quand tu as toutes les infos, renvoie uniquement un bloc \`\`\`json ... \`\`\` contenant le payload canonique complet et rien d'autre.
+Si vraiment tu n'y arrives pas, un bloc \`\`\`sql ... \`\`\` legacy reste tolere temporairement, mais le JSON canonique est la sortie attendue par priorite.`;
+}
+
+export async function buildONASystemPrompt(options = {}) {
+  const { rapport = "" } = options;
+
+  const [
+    tarifsResult,
+    rendementsResult,
+    materiauxResult,
+    postesSystematiquesResult,
+  ] = await Promise.all([
+    sb
+      .from("mo_tarifs")
+      .select("metier,icon,prix_lo,prix_sug,prix_hi,coeff_collectif,tx_h_lo,tx_h_hi,note")
+      .order("metier"),
+    sb
+      .from("mo_rendements")
+      .select("metier,prestation,unite,r_min,r_sug,r_max,coeff_complexite_reno,temps_fixe_j,ordre")
+      .order("metier")
+      .order("ordre"),
+    sb
+      .from("materiaux")
+      .select("categorie,label,unite,prix_lo,prix_sug,prix_hi,note")
+      .order("categorie")
+      .order("label"),
+    sb
+      .from("postes_systematiques")
+      .select("label,niveau,note")
+      .order("niveau")
+      .order("label"),
+  ]);
+
+  if (tarifsResult.error) throw tarifsResult.error;
+  if (rendementsResult.error) throw rendementsResult.error;
+  if (materiauxResult.error) throw materiauxResult.error;
+  if (postesSystematiquesResult.error) throw postesSystematiquesResult.error;
+
+  return buildONASystemPromptFromData({
+    rapport,
+    tarifs: tarifsResult.data || [],
+    rendements: rendementsResult.data || [],
+    materiaux: materiauxResult.data || [],
+    postesSystematiques: postesSystematiquesResult.data || [],
+  });
 }
 
 export function buildProjectAssistantSystem(project) {
@@ -213,16 +302,33 @@ export function buildProjectAssistantSystem(project) {
     suspens: project?.suspens || [],
   };
 
-  return `Tu es l'assistant chantier ONA pour le projet ${project?.client || "sans nom"} a ${project?.adresse || "adresse inconnue"}. Tous les prix sont HTVA.
-Tu reponds en francais, de facon concise, utile et concrete.
-Tu peux expliquer le chiffrage, relever des oublis, suggérer des ajustements et proposer des pistes d'optimisation.
-Tu ne generes pas de SQL ici. Tu analyses et conseilles a partir du devis courant.
+  return `Tu es le chef de chantier central ONA pour le projet ${project?.client || "sans nom"} a ${project?.adresse || "adresse inconnue"}. Tous les prix sont HTVA.
+
+${buildAssistantCommitteeFramework()}
+
+${buildProjectChatPolicyBlock()}
+
+${buildProjectReviewContext(project)}
+
+Tu reponds en francais de chantier belge, de facon concise, utile et concrete.
+Tu peux expliquer le chiffrage, relever des oublis, suggerer des ajustements et proposer des pistes d'optimisation.
 
 DEVIS ACTUEL (JSON) :
 ${JSON.stringify(slimProject, null, 2)}`;
 }
 
 export function extractSQL(text) {
-  const match = text?.match(/```sql\s*([\s\S]+?)```/i);
-  return match ? match[1].trim() : null;
+  return extractFencedBlock(text, "sql");
+}
+
+export function extractCanonicalPayload(text) {
+  const jsonBlock = extractFencedBlock(text, "json");
+  const candidate = jsonBlock || (String(text || "").trim().startsWith("{") ? String(text || "").trim() : null);
+  if (!candidate) return null;
+
+  try {
+    return JSON.parse(candidate);
+  } catch (_) {
+    return null;
+  }
 }
